@@ -1,0 +1,150 @@
+import React from 'react';
+import { Truck, MapPin } from 'lucide-react';
+import { useEcoBin } from '../../context/EcoBinContext';
+import { STATUS, STATUS_META } from '../../lib/telemetry';
+import { Card, EmptyState, Button, cx } from '../ui/Primitives';
+
+const TRUCK_STATUS = {
+  ON_ROUTE: { label: 'On Route', className: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300' },
+  IDLE: { label: 'Idle', className: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300' },
+  MAINTENANCE: { label: 'Maintenance', className: 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300' },
+};
+
+export const TrucksPanel = ({ limit }) => {
+  const { trucks, bins, assignments, setPage } = useEcoBin();
+
+  const rows = limit ? trucks.slice(0, limit) : trucks;
+
+  // Which bin each truck is currently headed to, from the live assignment map.
+  const targetFor = (truckId) => {
+    const entry = Object.entries(assignments).find(([, value]) => value.truckId === truckId);
+    if (!entry) return null;
+    return bins.find((bin) => bin.channelId === entry[0]) ?? null;
+  };
+
+  const queue = bins
+    .filter((bin) => bin.status === STATUS.FULL || bin.status === STATUS.ASSIGNED)
+    .sort((a, b) => (b.fill ?? 0) - (a.fill ?? 0));
+
+  return (
+    <Card className="flex flex-col">
+      <div className="flex items-center justify-between px-5 pt-4 pb-2">
+        <div>
+          <h2 className="text-sm font-bold text-slate-900 dark:text-white">Trucks &amp; Routes</h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            {trucks.filter((truck) => truck.status === 'ON_ROUTE').length} on route · {queue.length} stop
+            {queue.length === 1 ? '' : 's'} queued
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setPage('trucks')}
+          className="text-[11px] font-bold text-emerald-600 hover:underline dark:text-emerald-400"
+        >
+          View All
+        </button>
+      </div>
+
+      {trucks.length === 0 ? (
+        <EmptyState
+          compact
+          icon={Truck}
+          title="No trucks in the fleet"
+          description="Add your collection vehicles so full bins can be dispatched to a driver."
+          action={
+            <Button variant="primary" onClick={() => setPage('trucks')}>
+              Add a truck
+            </Button>
+          }
+        />
+      ) : (
+        <div className="grid gap-4 px-5 pb-5 lg:grid-cols-2">
+          {/* Fleet */}
+          <ul className="space-y-2">
+            {rows.map((truck) => {
+              const target = targetFor(truck.id);
+              const style = TRUCK_STATUS[truck.status] ?? TRUCK_STATUS.IDLE;
+              return (
+                <li
+                  key={truck.id}
+                  className="rounded-xl border border-slate-100 px-3 py-2.5 dark:border-slate-800"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-heading text-sm font-extrabold text-slate-900 dark:text-white">
+                      {truck.id}
+                    </span>
+                    <span
+                      className={cx(
+                        'rounded-full px-2 py-0.5 text-[10px] font-bold',
+                        style.className,
+                      )}
+                    >
+                      {style.label}
+                    </span>
+                  </div>
+                  <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                    Driver: {truck.driver}
+                  </p>
+                  <p className="mt-0.5 truncate text-[11px] text-slate-500 dark:text-slate-400">
+                    {target ? (
+                      <>
+                        <MapPin className="mr-1 inline h-3 w-3" />
+                        Heading to {target.id}
+                      </>
+                    ) : (
+                      'No stop assigned'
+                    )}
+                  </p>
+                </li>
+              );
+            })}
+          </ul>
+
+          {/* Queue */}
+          <div className="rounded-xl bg-slate-950 p-3 text-white">
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-xs font-bold">Pickup Queue</p>
+              <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-bold">
+                {queue.length} stop{queue.length === 1 ? '' : 's'}
+              </span>
+            </div>
+            {queue.length === 0 ? (
+              <p className="py-6 text-center text-[11px] text-slate-400">
+                Nothing needs collecting right now.
+              </p>
+            ) : (
+              <ul className="space-y-1.5">
+                {queue.slice(0, 5).map((bin) => (
+                  <li
+                    key={bin.channelId}
+                    className="flex items-center gap-2 rounded-lg bg-white/5 px-2.5 py-2"
+                  >
+                    <span
+                      className="h-2 w-2 shrink-0 rounded-full"
+                      style={{ background: STATUS_META[bin.status].hex }}
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[11px] font-bold">{bin.id}</span>
+                      <span className="block truncate text-[10px] text-slate-400">
+                        {bin.ward || bin.location}
+                      </span>
+                    </span>
+                    <span
+                      className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold tabular"
+                      style={{
+                        background: `${STATUS_META[bin.status].hex}22`,
+                        color: STATUS_META[bin.status].hex,
+                      }}
+                    >
+                      {bin.fill === null ? '—' : `${bin.fill}%`}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+};
