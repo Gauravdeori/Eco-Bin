@@ -1,0 +1,216 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import { MapContainer, Marker, Popup, TileLayer, useMap } from 'react-leaflet';
+import L from 'leaflet';
+import { MapPin, Filter, Navigation } from 'lucide-react';
+import { useEcoBin } from '../../context/EcoBinContext';
+import { STATUS, STATUS_META } from '../../lib/telemetry';
+import { Card, EmptyState, cx, Button } from '../ui/Primitives';
+
+const LEGEND = [
+  STATUS.NORMAL,
+  STATUS.FILLING,
+  STATUS.FULL,
+  STATUS.REPORTED,
+  STATUS.ASSIGNED,
+  STATUS.MAINTENANCE,
+];
+
+/** Marker built from a div so it can carry the fill number and a status colour. */
+const markerIcon = (bin, selected) => {
+  const meta = STATUS_META[bin.status];
+  const label = bin.fill === null ? '?' : `${bin.fill}`;
+  return L.divIcon({
+    className: 'bin-marker',
+    html: `
+      <div style="position:relative;display:flex;align-items:center;justify-content:center">
+        ${
+          bin.status === STATUS.FULL
+            ? `<span style="position:absolute;width:34px;height:34px;border-radius:9999px;background:${meta.hex};opacity:.28;animation:ping 1.4s cubic-bezier(0,0,.2,1) infinite"></span>`
+            : ''
+        }
+        <span style="
+          display:flex;align-items:center;justify-content:center;
+          width:30px;height:30px;border-radius:9999px;
+          background:${meta.hex};color:#fff;
+          font:700 10px/1 Inter,sans-serif;
+          border:2.5px solid ${selected ? '#0f172a' : '#fff'};
+          box-shadow:0 4px 12px rgba(15,23,42,.35);
+        ">${label}</span>
+      </div>`,
+    iconSize: [30, 30],
+    iconAnchor: [15, 15],
+    popupAnchor: [0, -16],
+  });
+};
+
+/** Keeps every visible bin inside the viewport as coordinates arrive. */
+const FitBounds = ({ points }) => {
+  const map = useMap();
+  const key = points.map((p) => p.join(',')).join('|');
+
+  useEffect(() => {
+    if (points.length === 0) return;
+    if (points.length === 1) {
+      map.setView(points[0], 16);
+      return;
+    }
+    map.fitBounds(L.latLngBounds(points), { padding: [42, 42], maxZoom: 17 });
+    // `key` stands in for the point list; comparing arrays by identity would refit every render.
+  }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return null;
+};
+
+export const LiveBinMap = ({ height = 'h-[340px]' }) => {
+  const { bins, selectedBin, setSelectedChannelId, setPage, assignTruck } = useEcoBin();
+  const [filter, setFilter] = useState('ALL');
+
+  const visible = useMemo(
+    () => (filter === 'ALL' ? bins : bins.filter((bin) => bin.status === filter)),
+    [bins, filter],
+  );
+
+  const located = visible.filter((bin) => bin.lat !== null && bin.lng !== null);
+  const points = located.map((bin) => [bin.lat, bin.lng]);
+  const missing = visible.length - located.length;
+
+  return (
+    <Card className="flex flex-col overflow-hidden">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-5 pt-4 pb-3">
+        <div className="flex items-center gap-2">
+          <span className="rounded-xl bg-emerald-50 p-2 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400">
+            <MapPin className="h-4 w-4" />
+          </span>
+          <div>
+            <h2 className="text-sm font-bold text-slate-900 dark:text-white">Live Bin Map</h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              {located.length} of {bins.length} bins positioned
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <div className="relative">
+            <Filter className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+            <select
+              value={filter}
+              onChange={(event) => setFilter(event.target.value)}
+              aria-label="Filter bins by status"
+              className="appearance-none rounded-xl border border-slate-200 bg-white py-2 pl-8 pr-7 text-xs font-semibold text-slate-700 focus:border-brand-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+            >
+              <option value="ALL">All statuses</option>
+              {LEGEND.map((status) => (
+                <option key={status} value={status}>
+                  {STATUS_META[status].label}
+                </option>
+              ))}
+              <option value={STATUS.OFFLINE}>Offline</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div className={cx('relative mx-4 overflow-hidden rounded-xl', height)}>
+        {points.length > 0 ? (
+          <MapContainer
+            center={points[0]}
+            zoom={15}
+            scrollWheelZoom={false}
+            className="h-full w-full"
+            attributionControl={false}
+          >
+            <TileLayer
+              url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+              attribution='&copy; OpenStreetMap contributors'
+              maxZoom={19}
+            />
+            <FitBounds points={points} />
+            {located.map((bin) => (
+              <Marker
+                key={bin.channelId}
+                position={[bin.lat, bin.lng]}
+                icon={markerIcon(bin, selectedBin?.channelId === bin.channelId)}
+                eventHandlers={{ click: () => setSelectedChannelId(bin.channelId) }}
+              >
+                <Popup>
+                  <div className="min-w-[190px] p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="font-heading text-sm font-extrabold text-slate-900">{bin.id}</p>
+                      <span
+                        className="rounded-full px-2 py-0.5 text-[10px] font-bold text-white"
+                        style={{ background: STATUS_META[bin.status].hex }}
+                      >
+                        {STATUS_META[bin.status].label}
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-[11px] text-slate-500">{bin.location}</p>
+                    <div className="mt-2 flex items-center gap-3 text-[11px] text-slate-600">
+                      <span>
+                        Fill <b className="tabular">{bin.fill === null ? '—' : `${bin.fill}%`}</b>
+                      </span>
+                      <span>
+                        Weight{' '}
+                        <b className="tabular">{bin.weight === null ? '—' : `${bin.weight} kg`}</b>
+                      </span>
+                    </div>
+                    {bin.status === STATUS.FULL && (
+                      <button
+                        type="button"
+                        onClick={() => assignTruck(bin.channelId)}
+                        className="mt-2.5 w-full rounded-lg bg-emerald-600 px-3 py-1.5 text-[11px] font-bold text-white hover:bg-emerald-500"
+                      >
+                        Assign nearest truck
+                      </button>
+                    )}
+                  </div>
+                </Popup>
+              </Marker>
+            ))}
+          </MapContainer>
+        ) : (
+          <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50 dark:border-slate-700 dark:bg-slate-900/60">
+            <EmptyState
+              icon={Navigation}
+              title={bins.length ? 'No coordinates yet' : 'No bins connected'}
+              description={
+                bins.length
+                  ? 'Publish latitude and longitude from the device, or set each bin’s position in Settings.'
+                  : 'Add a ThingSpeak channel in Settings and bins will appear here as they report.'
+              }
+              action={
+                <Button variant="primary" onClick={() => setPage('settings')}>
+                  Open settings
+                </Button>
+              }
+            />
+          </div>
+        )}
+      </div>
+
+      {/* Legend */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3.5">
+        {LEGEND.map((status) => (
+          <button
+            key={status}
+            type="button"
+            onClick={() => setFilter((current) => (current === status ? 'ALL' : status))}
+            className={cx(
+              'flex items-center gap-1.5 text-[11px] font-medium transition-colors',
+              filter === status
+                ? 'font-bold text-slate-900 dark:text-white'
+                : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200',
+            )}
+          >
+            <span className={cx('h-2 w-2 rounded-full', STATUS_META[status].dot)} />
+            {STATUS_META[status].label}
+          </button>
+        ))}
+        {missing > 0 && (
+          <span className="ml-auto text-[11px] text-amber-600 dark:text-amber-400">
+            {missing} without coordinates
+          </span>
+        )}
+      </div>
+    </Card>
+  );
+};
