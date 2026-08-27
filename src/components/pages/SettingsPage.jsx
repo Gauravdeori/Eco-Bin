@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { Plus, Trash, RotateCcw, CheckCircle2, XCircle, Loader2, Radio } from 'lucide-react';
+import { Plus, Trash, RotateCcw, CheckCircle2, XCircle, Loader2, Radio, Map } from 'lucide-react';
 import { useEcoBin } from '../../context/EcoBinContext';
 import { fetchChannelFeed } from '../../services/thingspeak';
 import { formatRelative, validCoords } from '../../lib/telemetry';
 import { Card, CardHeader, EmptyState, Field, Button, inputClass, cx } from '../ui/Primitives';
+import { LocationPicker } from '../settings/LocationPicker';
 
 const FIELD_LABELS = {
   fill: 'Fill level (%)',
@@ -123,6 +124,7 @@ const AddChannel = ({ onAdd, existing }) => {
 export const SettingsPage = () => {
   const { settings, updateSettings, resetSettings, bins, linkErrors, lastSync, refresh } =
     useEcoBin();
+  const [picking, setPicking] = useState(null);
 
   const addChannel = (channel) =>
     updateSettings((current) => ({ ...current, channels: [...current.channels, channel] }));
@@ -270,9 +272,17 @@ export const SettingsPage = () => {
                         className={cx(inputClass, 'w-32 py-1.5 text-xs')}
                       />
 
+                      <Button onClick={() => setPicking(channel.channelId)}>
+                        <Map className="h-3.5 w-3.5" /> Set on map
+                      </Button>
+
                       {typedCoords(meta) && !validCoords(Number(meta.lat), Number(meta.lng)) ? (
                         <span className="text-[11px] font-semibold text-rose-600 dark:text-rose-400">
                           Not a valid coordinate
+                        </span>
+                      ) : bin?.positionWarning ? (
+                        <span className="text-[11px] font-semibold text-amber-600 dark:text-amber-400">
+                          {bin.positionWarning}
                         </span>
                       ) : (
                         <span className="text-[11px] text-slate-500 dark:text-slate-400">
@@ -404,6 +414,21 @@ export const SettingsPage = () => {
           </div>
         </Card>
       </div>
+
+      {picking && (
+        <LocationPicker
+          binLabel={
+            bins.find((bin) => bin.channelId === picking)?.id ?? `channel #${picking}`
+          }
+          lat={settings.binMeta[picking]?.lat}
+          lng={settings.binMeta[picking]?.lng}
+          onClose={() => setPicking(null)}
+          onSave={(lat, lng) => {
+            setMeta(picking, { lat, lng });
+            setPicking(null);
+          }}
+        />
+      )}
     </div>
   );
 };

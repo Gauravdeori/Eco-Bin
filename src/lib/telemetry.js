@@ -145,6 +145,14 @@ export const buildBin = (
     [lat, lng, positionSource] = [fromChannel[0], fromChannel[1], 'channel'];
   }
 
+  // A half-entered coordinate is worse than none: it plots confidently in the
+  // ocean. Withhold it from the map and let the UI explain what to fix.
+  const positionWarning = suspiciousCoords(lat, lng);
+  if (positionWarning) {
+    lat = null;
+    lng = null;
+  }
+
   const collections = findCollections(readings, collectionDropPercent);
   const capacityKg = toNumber(meta.capacityKg);
 
@@ -162,7 +170,8 @@ export const buildBin = (
     category: latest?.category ?? null,
     lat,
     lng,
-    positionSource,
+    positionSource: lat === null ? null : positionSource,
+    positionWarning,
     lastSeen,
     silentFor,
     isOffline,
