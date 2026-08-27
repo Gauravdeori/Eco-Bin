@@ -48,23 +48,25 @@ cp .env.example .env
 
 ### Field mapping
 
-By default the app expects:
+Out of the box the app reads two fields:
 
 | Measurement | Field | Notes |
 |---|---|---|
-| Fill level (%) | `field1` | Clamped to 0–100 |
+| Fill level (%) | `field1` | Required. Clamped to 0–100 |
 | Weight (kg) | `field2` | |
-| Battery (%) | `field3` | Below 20% raises an alert |
-| Latitude | `field4` | Falls back to the channel's own metadata |
-| Longitude | `field5` | |
-| Temperature (°C) | `field6` | Optional |
-| Humidity (%) | `field7` | Optional |
-| Lid state | `field8` | Optional |
-| Waste category | *unmapped* | `0` Dry · `1` Wet · `2` Mixed · `3` Hazardous |
 
-Change any of these on the Settings page — set a measurement to **Not sent** if your
-device does not publish it. If your device sends no coordinates at all, you can type
-each bin's position in Settings instead.
+The bin number is not a field — it is the channel's label, which you set per
+channel on the Settings page (or leave blank to use the ThingSpeak channel name).
+
+Everything else is off by default and shows as `—`. Turn any of it on under
+**Settings → Field mapping** once your device starts publishing it:
+
+| Measurement | Notes |
+|---|---|
+| Battery (%) | Below 20% raises an alert |
+| Latitude / Longitude | Or set the channel location in ThingSpeak, or type coordinates in Settings |
+| Temperature (°C) / Humidity (%) | Shown on the bin details panel |
+| Waste category | `0` Dry · `1` Wet · `2` Mixed · `3` Hazardous — drives the AI Segregation page |
 
 ### What the app derives for you
 

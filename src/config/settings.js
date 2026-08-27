@@ -35,17 +35,22 @@ export const DEFAULT_SETTINGS = {
   channels: envChannels(),
   pollSeconds: num(env.VITE_THINGSPEAK_POLL_SECONDS, 15),
   historyPoints: num(env.VITE_THINGSPEAK_HISTORY, 100),
+  /**
+   * Which ThingSpeak field carries which measurement. 0 means "my device does
+   * not send this" — the dashboard then shows a dash instead of a number.
+   *
+   * Only fill and weight are on by default. Turn the others on in Settings if
+   * and when the device starts publishing them.
+   */
   fieldMap: {
     fill: num(env.VITE_FIELD_FILL, 1),
     weight: num(env.VITE_FIELD_WEIGHT, 2),
-    battery: num(env.VITE_FIELD_BATTERY, 3),
-    lat: num(env.VITE_FIELD_LAT, 4),
-    lng: num(env.VITE_FIELD_LNG, 5),
-    temperature: num(env.VITE_FIELD_TEMPERATURE, 6),
-    humidity: num(env.VITE_FIELD_HUMIDITY, 7),
-    lid: num(env.VITE_FIELD_LID, 8),
-    // Waste category published by the on-device classifier.
-    // 0 disables it; see AI Segregation page for the code the app expects.
+    battery: num(env.VITE_FIELD_BATTERY, 0),
+    lat: num(env.VITE_FIELD_LAT, 0),
+    lng: num(env.VITE_FIELD_LNG, 0),
+    temperature: num(env.VITE_FIELD_TEMPERATURE, 0),
+    humidity: num(env.VITE_FIELD_HUMIDITY, 0),
+    // Waste category from an on-device classifier; see the AI Segregation page.
     category: num(env.VITE_FIELD_CATEGORY, 0),
   },
   thresholds: {

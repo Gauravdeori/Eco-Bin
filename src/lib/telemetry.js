@@ -53,7 +53,6 @@ export const parseEntry = (entry, fieldMap) => ({
   lng: readField(entry, fieldMap.lng) ?? toNumber(entry.longitude),
   temperature: readField(entry, fieldMap.temperature),
   humidity: readField(entry, fieldMap.humidity),
-  lid: readField(entry, fieldMap.lid),
   category: readField(entry, fieldMap.category),
 });
 
@@ -118,7 +117,6 @@ export const buildBin = (
     battery: latest?.battery ?? null,
     temperature: latest?.temperature ?? null,
     humidity: latest?.humidity ?? null,
-    lid: latest?.lid ?? null,
     category: latest?.category ?? null,
     lat: lat ?? null,
     lng: lng ?? null,

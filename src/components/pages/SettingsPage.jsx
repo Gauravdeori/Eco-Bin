@@ -13,7 +13,6 @@ const FIELD_LABELS = {
   lng: 'Longitude',
   temperature: 'Temperature (°C)',
   humidity: 'Humidity (%)',
-  lid: 'Lid state',
   category: 'Waste category',
 };
 
