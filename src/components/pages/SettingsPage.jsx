@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Plus, Trash, RotateCcw, CheckCircle2, XCircle, Loader2, Radio } from 'lucide-react';
 import { useEcoBin } from '../../context/EcoBinContext';
 import { fetchChannelFeed } from '../../services/thingspeak';
-import { formatRelative } from '../../lib/telemetry';
+import { formatRelative, validCoords } from '../../lib/telemetry';
 import { Card, CardHeader, EmptyState, Field, Button, inputClass, cx } from '../ui/Primitives';
 
 const FIELD_LABELS = {
@@ -17,6 +17,16 @@ const FIELD_LABELS = {
 };
 
 const FIELD_OPTIONS = [0, 1, 2, 3, 4, 5, 6, 7, 8];
+
+/** Where the coordinate the map is using actually came from. */
+const POSITION_SOURCE = {
+  device: 'Position: live GPS from the device',
+  manual: 'Position: set here',
+  channel: 'Position: from the ThingSpeak channel location',
+  none: 'No position — this bin will not appear on the map',
+};
+
+const typedCoords = (meta) => Boolean(String(meta.lat ?? '').trim() && String(meta.lng ?? '').trim());
 
 /** Adds a channel after checking it actually answers. */
 const AddChannel = ({ onAdd, existing }) => {
@@ -240,24 +250,36 @@ export const SettingsPage = () => {
                       />
                     </div>
 
-                    {bin && bin.lat === null && (
-                      <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                        <input
-                          value={meta.lat ?? ''}
-                          onChange={(event) => setMeta(channel.channelId, { lat: event.target.value })}
-                          placeholder="Latitude (device sends none)"
-                          aria-label="Latitude"
-                          className={cx(inputClass, 'py-1.5 text-xs')}
-                        />
-                        <input
-                          value={meta.lng ?? ''}
-                          onChange={(event) => setMeta(channel.channelId, { lng: event.target.value })}
-                          placeholder="Longitude (device sends none)"
-                          aria-label="Longitude"
-                          className={cx(inputClass, 'py-1.5 text-xs')}
-                        />
-                      </div>
-                    )}
+                    {/* Position is always editable: a bin that sits in the
+                        wrong place needs correcting, not just filling in. */}
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <input
+                        value={meta.lat ?? ''}
+                        onChange={(event) => setMeta(channel.channelId, { lat: event.target.value })}
+                        placeholder="Latitude"
+                        inputMode="decimal"
+                        aria-label="Latitude"
+                        className={cx(inputClass, 'w-32 py-1.5 text-xs')}
+                      />
+                      <input
+                        value={meta.lng ?? ''}
+                        onChange={(event) => setMeta(channel.channelId, { lng: event.target.value })}
+                        placeholder="Longitude"
+                        inputMode="decimal"
+                        aria-label="Longitude"
+                        className={cx(inputClass, 'w-32 py-1.5 text-xs')}
+                      />
+
+                      {typedCoords(meta) && !validCoords(Number(meta.lat), Number(meta.lng)) ? (
+                        <span className="text-[11px] font-semibold text-rose-600 dark:text-rose-400">
+                          Not a valid coordinate
+                        </span>
+                      ) : (
+                        <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                          {POSITION_SOURCE[bin?.positionSource] ?? POSITION_SOURCE.none}
+                        </span>
+                      )}
+                    </div>
                   </li>
                 );
               })}

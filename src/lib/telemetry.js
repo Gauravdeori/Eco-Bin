@@ -42,6 +42,21 @@ const readField = (entry, fieldNumber) => {
 const clampPercent = (value) =>
   value === null ? null : Math.max(0, Math.min(100, Math.round(value)));
 
+/**
+ * Validates a coordinate pair.
+ *
+ * ThingSpeak reports `latitude: "0.0", longitude: "0.0"` for any channel whose
+ * location was never set, and a device that has not got a GPS fix often sends
+ * the same. Exactly (0, 0) is a spot in the Atlantic, never a real bin, so it
+ * is treated as "no position" rather than plotted.
+ */
+export const validCoords = (lat, lng) => {
+  if (lat === null || lng === null) return false;
+  if (Number.isNaN(lat) || Number.isNaN(lng)) return false;
+  if (lat === 0 && lng === 0) return false;
+  return lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
+};
+
 /** Maps a raw ThingSpeak entry into a normalised reading. */
 export const parseEntry = (entry, fieldMap) => ({
   at: new Date(entry.created_at),
@@ -97,11 +112,23 @@ export const buildBin = (
   const silentFor = lastSeen ? now - lastSeen.getTime() : null;
   const isOffline = silentFor === null || silentFor > OFFLINE_AFTER_MS;
 
-  // Position: the newest reading that actually carried coordinates, else the
-  // channel's own metadata, else whatever the operator typed in Settings.
-  const positioned = [...readings].reverse().find((r) => r.lat !== null && r.lng !== null);
-  const lat = positioned?.lat ?? toNumber(channel.latitude) ?? toNumber(meta.lat);
-  const lng = positioned?.lng ?? toNumber(channel.longitude) ?? toNumber(meta.lng);
+  // Position, most trusted first: a live fix from the device, then the address
+  // the operator typed in Settings, then the channel's own location metadata.
+  const fix = [...readings].reverse().find((r) => validCoords(r.lat, r.lng));
+  const manual = [toNumber(meta.lat), toNumber(meta.lng)];
+  const fromChannel = [toNumber(channel.latitude), toNumber(channel.longitude)];
+
+  let lat = null;
+  let lng = null;
+  let positionSource = null;
+
+  if (fix) {
+    [lat, lng, positionSource] = [fix.lat, fix.lng, 'device'];
+  } else if (validCoords(manual[0], manual[1])) {
+    [lat, lng, positionSource] = [manual[0], manual[1], 'manual'];
+  } else if (validCoords(fromChannel[0], fromChannel[1])) {
+    [lat, lng, positionSource] = [fromChannel[0], fromChannel[1], 'channel'];
+  }
 
   const collections = findCollections(readings, collectionDropPercent);
   const capacityKg = toNumber(meta.capacityKg);
@@ -118,8 +145,9 @@ export const buildBin = (
     temperature: latest?.temperature ?? null,
     humidity: latest?.humidity ?? null,
     category: latest?.category ?? null,
-    lat: lat ?? null,
-    lng: lng ?? null,
+    lat,
+    lng,
+    positionSource,
     lastSeen,
     silentFor,
     isOffline,

@@ -61,7 +61,13 @@ const FitBounds = ({ points }) => {
   return null;
 };
 
-export const LiveBinMap = ({ height = 'h-[340px]' }) => {
+const SOURCE_LABEL = {
+  device: 'live GPS',
+  manual: 'set in Settings',
+  channel: 'channel location',
+};
+
+export const LiveBinMap = ({ height = 'h-[340px]', scrollZoom = false }) => {
   const { bins, selectedBin, setSelectedChannelId, setPage, assignTruck } = useEcoBin();
   const [filter, setFilter] = useState('ALL');
 
@@ -115,9 +121,8 @@ export const LiveBinMap = ({ height = 'h-[340px]' }) => {
           <MapContainer
             center={points[0]}
             zoom={15}
-            scrollWheelZoom={false}
+            scrollWheelZoom={scrollZoom}
             className="h-full w-full"
-            attributionControl={false}
           >
             <TileLayer
               url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -144,6 +149,10 @@ export const LiveBinMap = ({ height = 'h-[340px]' }) => {
                       </span>
                     </div>
                     <p className="mt-0.5 text-[11px] text-slate-500">{bin.location}</p>
+                    <p className="mt-0.5 font-mono text-[10px] text-slate-400">
+                      {bin.lat.toFixed(5)}, {bin.lng.toFixed(5)}
+                      {bin.positionSource ? ` · ${SOURCE_LABEL[bin.positionSource]}` : ''}
+                    </p>
                     <div className="mt-2 flex items-center gap-3 text-[11px] text-slate-600">
                       <span>
                         Fill <b className="tabular">{bin.fill === null ? '—' : `${bin.fill}%`}</b>
@@ -174,7 +183,7 @@ export const LiveBinMap = ({ height = 'h-[340px]' }) => {
               title={bins.length ? 'No coordinates yet' : 'No bins connected'}
               description={
                 bins.length
-                  ? 'Publish latitude and longitude from the device, or set each bin’s position in Settings.'
+                  ? 'Set each bin’s latitude and longitude in Settings, or give the channel a location in ThingSpeak.'
                   : 'Add a ThingSpeak channel in Settings and bins will appear here as they report.'
               }
               action={
