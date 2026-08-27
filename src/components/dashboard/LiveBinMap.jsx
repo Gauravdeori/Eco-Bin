@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { MapContainer, Marker, Popup, TileLayer, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import { MapPin, Filter, Navigation } from 'lucide-react';
+import { MapPin, Filter, Navigation, AlertTriangle } from 'lucide-react';
 import { useEcoBin } from '../../context/EcoBinContext';
-import { STATUS, STATUS_META } from '../../lib/telemetry';
+import { STATUS, STATUS_META, suspiciousCoords } from '../../lib/telemetry';
 import { Card, EmptyState, cx, Button } from '../ui/Primitives';
 
 const LEGEND = [
@@ -80,6 +80,15 @@ export const LiveBinMap = ({ height = 'h-[340px]', scrollZoom = false }) => {
   const points = located.map((bin) => [bin.lat, bin.lng]);
   const missing = visible.length - located.length;
 
+  // Show the coordinate of whichever bin the console is focused on.
+  const focused =
+    located.find((bin) => bin.channelId === selectedBin?.channelId) ??
+    (located.length === 1 ? located[0] : null);
+
+  const flagged = located
+    .map((bin) => ({ bin, warning: suspiciousCoords(bin.lat, bin.lng) }))
+    .filter((entry) => entry.warning);
+
   return (
     <Card className="flex flex-col overflow-hidden">
       <div className="flex flex-wrap items-center justify-between gap-3 px-5 pt-4 pb-3">
@@ -91,6 +100,12 @@ export const LiveBinMap = ({ height = 'h-[340px]', scrollZoom = false }) => {
             <h2 className="text-sm font-bold text-slate-900 dark:text-white">Live Bin Map</h2>
             <p className="text-xs text-slate-500 dark:text-slate-400">
               {located.length} of {bins.length} bins positioned
+              {focused && (
+                <span className="ml-1 font-mono text-[11px] text-slate-400">
+                  · {focused.lat.toFixed(5)}, {focused.lng.toFixed(5)}
+                  {focused.positionSource ? ` (${SOURCE_LABEL[focused.positionSource]})` : ''}
+                </span>
+              )}
             </p>
           </div>
         </div>
@@ -115,6 +130,25 @@ export const LiveBinMap = ({ height = 'h-[340px]', scrollZoom = false }) => {
           </div>
         </div>
       </div>
+
+      {flagged.length > 0 && (
+        <div className="mx-4 mb-2 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-500/30 dark:bg-amber-500/10">
+          <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+          <div className="min-w-0 flex-1">
+            <p className="text-[11px] font-bold text-amber-800 dark:text-amber-300">
+              {flagged.length === 1
+                ? `${flagged[0].bin.id} looks mispositioned`
+                : `${flagged.length} bins look mispositioned`}
+            </p>
+            <p className="text-[11px] text-amber-700/90 dark:text-amber-300/80">
+              {flagged[0].warning}
+            </p>
+          </div>
+          <Button variant="secondary" onClick={() => setPage('settings')}>
+            Fix in Settings
+          </Button>
+        </div>
+      )}
 
       <div className={cx('relative mx-4 overflow-hidden rounded-xl', height)}>
         {points.length > 0 ? (

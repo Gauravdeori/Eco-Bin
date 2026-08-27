@@ -57,6 +57,21 @@ export const validCoords = (lat, lng) => {
   return lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
 };
 
+/**
+ * A coordinate that parses but is almost certainly wrong.
+ *
+ * Half a coordinate is the common failure: a real latitude with the longitude
+ * left blank (or the reverse) reads as 0 and puts the bin in the Atlantic. No
+ * municipal bin sits exactly on the equator or the prime meridian, so treat a
+ * lone zero as a data-entry mistake and say so rather than plotting it quietly.
+ */
+export const suspiciousCoords = (lat, lng) => {
+  if (!validCoords(lat, lng)) return null;
+  if (lat === 0) return 'Latitude is 0 — the longitude may have been entered on its own.';
+  if (lng === 0) return 'Longitude is 0 — the latitude may have been entered on its own.';
+  return null;
+};
+
 /** Maps a raw ThingSpeak entry into a normalised reading. */
 export const parseEntry = (entry, fieldMap) => ({
   at: new Date(entry.created_at),
