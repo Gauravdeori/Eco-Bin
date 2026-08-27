@@ -1,22 +1,9 @@
 import React, { useMemo, useState } from 'react';
-import {
-  ResponsiveContainer,
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  Tooltip,
-  CartesianGrid,
-} from 'recharts';
 import { Search, Trash2, ArrowUpDown } from 'lucide-react';
 import { useEcoBin } from '../../context/EcoBinContext';
-import {
-  STATUS_META,
-  fillSeries,
-  formatNumber,
-  formatRelative,
-} from '../../lib/telemetry';
-import { Card, CardHeader, EmptyState, StatusPill, Button, inputClass, cx } from '../ui/Primitives';
+import { ReadingsChart } from '../dashboard/ReadingsChart';
+import { STATUS_META, formatNumber, formatRelative } from '../../lib/telemetry';
+import { Card, EmptyState, StatusPill, Button, inputClass, cx } from '../ui/Primitives';
 
 const SORTS = {
   fill: { label: 'Fill level', compare: (a, b) => (b.fill ?? -1) - (a.fill ?? -1) },
@@ -42,8 +29,6 @@ export const BinsPage = () => {
       )
       .sort(SORTS[sort].compare);
   }, [bins, query, sort]);
-
-  const series = selectedBin ? fillSeries(selectedBin) : [];
 
   if (bins.length === 0) {
     return (
@@ -174,56 +159,7 @@ export const BinsPage = () => {
         )}
       </Card>
 
-      {selectedBin && (
-        <Card>
-          <CardHeader
-            title={`${selectedBin.id} — fill history`}
-            subtitle={`${series.length} readings from channel #${selectedBin.channelId}`}
-          />
-          <div className="h-[240px] px-3 pb-4">
-            {series.length === 0 ? (
-              <EmptyState compact title="No fill readings on this channel yet" />
-            ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={series} margin={{ top: 8, right: 12, bottom: 0, left: -20 }}>
-                  <defs>
-                    <linearGradient id="fillArea" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#17a34a" stopOpacity={0.35} />
-                      <stop offset="100%" stopColor="#17a34a" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid stroke="rgba(148,163,184,0.2)" vertical={false} />
-                  <XAxis
-                    dataKey="time"
-                    tick={{ fontSize: 10, fill: '#94a3b8' }}
-                    tickLine={false}
-                    axisLine={false}
-                    minTickGap={24}
-                  />
-                  <YAxis
-                    domain={[0, 100]}
-                    tick={{ fontSize: 10, fill: '#94a3b8' }}
-                    tickLine={false}
-                    axisLine={false}
-                    width={34}
-                  />
-                  <Tooltip
-                    contentStyle={{ borderRadius: 12, fontSize: 12, border: '1px solid rgba(148,163,184,0.3)' }}
-                    formatter={(value) => [`${value}%`, 'Fill']}
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="fill"
-                    stroke="#17a34a"
-                    strokeWidth={2.5}
-                    fill="url(#fillArea)"
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
-            )}
-          </div>
-        </Card>
-      )}
+      <ReadingsChart height="h-[280px]" />
     </div>
   );
 };

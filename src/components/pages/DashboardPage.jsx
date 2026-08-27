@@ -5,6 +5,7 @@ import { RecentAlerts } from '../dashboard/RecentAlerts';
 import { CollectionProgress, CollectionActivity } from '../dashboard/CollectionPanels';
 import { BinDetailsPanel } from '../dashboard/BinDetailsPanel';
 import { TrucksPanel } from '../dashboard/TrucksPanel';
+import { ReadingsChart } from '../dashboard/ReadingsChart';
 import { AnalyticsOverview } from '../dashboard/AnalyticsOverview';
 
 export const DashboardPage = () => (
@@ -26,6 +27,8 @@ export const DashboardPage = () => (
         <BinDetailsPanel />
       </div>
     </div>
+
+    <ReadingsChart />
 
     <div className="grid gap-4 xl:grid-cols-12">
       <div className="xl:col-span-5">

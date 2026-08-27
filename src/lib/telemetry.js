@@ -149,13 +149,23 @@ export const applyOverlays = (bin, { assignments, maintenance, reports }) => {
   return { ...bin, status, assignment: assignment ?? null, openReport: openReport ?? null };
 };
 
-/** Fill-level series for the selected bin, thinned to a chart-friendly length. */
-export const fillSeries = (bin, maxPoints = 40) => {
-  const points = bin.readings.filter((r) => r.fill !== null);
+/**
+ * Time series for the selected bin, thinned to a chart-friendly length.
+ * Keeps any reading that carried a fill level or a weight, so a device that
+ * only sends one of the two still charts.
+ */
+export const readingSeries = (bin, maxPoints = 60) => {
+  const points = bin.readings.filter((r) => r.fill !== null || r.weight !== null);
   const step = Math.max(1, Math.ceil(points.length / maxPoints));
   return points
-    .filter((_, index) => index % step === 0)
-    .map((r) => ({ at: r.at, time: formatTime(r.at), fill: r.fill, weight: r.weight }));
+    .filter((_, index) => index % step === 0 || index === points.length - 1)
+    .map((r) => ({
+      at: r.at,
+      label: formatStamp(r.at),
+      full: formatDateTime(r.at),
+      fill: r.fill,
+      weight: r.weight,
+    }));
 };
 
 /** Collections per day across every bin, for the trend chart. */
