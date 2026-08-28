@@ -138,6 +138,31 @@
   animation: bin-blink 1.6s ease-in-out infinite;
 }
 
+/* Name plate under the pin, so a bin is identifiable without clicking it. */
+.bin-pin .name {
+  position: absolute;
+  top: 32px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #0f172a;
+  font: 700 10px/1.35 Inter, sans-serif;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.25);
+  /* Never swallow a click meant for the pin underneath. */
+  pointer-events: none;
+}
+
+.dark .bin-pin .name {
+  background: rgba(15, 23, 42, 0.92);
+  color: #e2e8f0;
+}
+
 /* Bins that are not reporting sit still — a blink would imply live data. */
 .bin-pin.static .dot {
   animation: none;

@@ -117,7 +117,7 @@ export const findCollections = (readings, dropPercent) => {
  */
 export const buildBin = (
   { channel, feeds, source },
-  { fieldMap, thresholds, collectionDropPercent, binMeta, now = Date.now() },
+  { fieldMap, thresholds, collectionDropPercent, binMeta, index = 0, now = Date.now() },
 ) => {
   const readings = feeds.map((entry) => parseEntry(entry, fieldMap));
   const latest = readings[readings.length - 1] ?? null;
@@ -157,7 +157,7 @@ export const buildBin = (
   const capacityKg = toNumber(meta.capacityKg);
 
   return {
-    id: meta.label || channel.name || `CH-${source.channelId}`,
+    id: meta.label || channel.name || `Eco Bin ${index + 1}`,
     channelId: String(source.channelId),
     location: meta.location || channel.metadata || channel.description || 'Location not set',
     ward: meta.ward || '',

@@ -16,6 +16,14 @@ const LEGEND = [
   STATUS.MAINTENANCE,
 ];
 
+/** Bin names are operator-typed, so they cannot go into markup unescaped. */
+const escapeHtml = (value) =>
+  String(value).replace(
+    /[&<>"']/g,
+    (character) =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character],
+  );
+
 /**
  * Marker built from a div so it can carry the fill number and pulse in its
  * status colour. Offline and maintenance bins are drawn static: a blink would
@@ -32,6 +40,7 @@ const markerIcon = (bin, selected) => {
       <div class="bin-pin${live ? '' : ' static'}" style="--pin:${meta.hex}">
         ${live ? '<span class="halo"></span><span class="halo delayed"></span>' : ''}
         <span class="dot" style="border-color:${selected ? '#0f172a' : '#fff'}">${label}</span>
+        <span class="name">${escapeHtml(bin.id)}</span>
       </div>`,
     iconSize: [30, 30],
     iconAnchor: [15, 15],

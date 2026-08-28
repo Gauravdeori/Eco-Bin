@@ -90,8 +90,9 @@ export const EcoBinProvider = ({ children }) => {
   /* ── raw feeds → bins ───────────────────────────────────────────────────── */
   const telemetryBins = useMemo(
     () =>
-      results.map((result) =>
+      results.map((result, index) =>
         buildBin(result, {
+          index,
           fieldMap: settings.fieldMap,
           thresholds: settings.thresholds,
           collectionDropPercent: settings.collectionDropPercent,
