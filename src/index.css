@@ -71,6 +71,12 @@
   background: #0f172a;
 }
 
+/* Override Tailwind's img { max-width: 100%; height: auto; } which breaks map tiles */
+.leaflet-container .leaflet-pane img {
+  max-width: none !important;
+  max-height: none !important;
+}
+
 /* The dark map is the light tile layer, dimmed — no second tile request. */
 .dark .leaflet-tile-pane {
   filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.88) saturate(0.6);

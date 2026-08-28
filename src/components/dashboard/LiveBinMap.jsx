@@ -50,14 +50,18 @@ const FitBounds = ({ points }) => {
   const key = points.map((p) => p.join(',')).join('|');
 
   useEffect(() => {
-    if (points.length === 0) return;
+    // Force Leaflet to re-check container size after DOM updates
+    const timer = setTimeout(() => map.invalidateSize(), 100);
+
+    if (points.length === 0) return () => clearTimeout(timer);
     if (points.length === 1) {
       map.setView(points[0], 16);
-      return;
+      return () => clearTimeout(timer);
     }
     map.fitBounds(L.latLngBounds(points), { padding: [42, 42], maxZoom: 17 });
-    // `key` stands in for the point list; comparing arrays by identity would refit every render.
-  }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
+    
+    return () => clearTimeout(timer);
+  }, [key, map]);
 
   return null;
 };
