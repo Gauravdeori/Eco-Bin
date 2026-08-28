@@ -3,6 +3,8 @@ import { MapContainer, Marker, TileLayer, useMap, useMapEvents } from 'react-lea
 import L from 'leaflet';
 import { Search, X, Loader2, MapPin, Crosshair } from 'lucide-react';
 import { validCoords } from '../../lib/telemetry';
+import { geocode } from '../../services/routing';
+import { useEcoBin } from '../../context/EcoBinContext';
 import { Button, inputClass, cx } from '../ui/Primitives';
 
 const pinIcon = L.divIcon({
@@ -31,22 +33,8 @@ const Recenter = ({ position, zoom }) => {
   return null;
 };
 
-/**
- * Address lookup via OpenStreetMap's Nominatim.
- * Free and keyless, but rate limited to one request a second, so it only runs
- * when the form is submitted — never on each keystroke.
- */
-const search = async (query, signal) => {
-  const url = new URL('https://nominatim.openstreetmap.org/search');
-  url.searchParams.set('q', query);
-  url.searchParams.set('format', 'json');
-  url.searchParams.set('limit', '5');
-  const response = await fetch(url, { signal, headers: { Accept: 'application/json' } });
-  if (!response.ok) throw new Error('Address lookup failed.');
-  return response.json();
-};
-
 export const LocationPicker = ({ binLabel, lat, lng, onSave, onClose }) => {
+  const { settings } = useEcoBin();
   const initial = validCoords(Number(lat), Number(lng)) ? [Number(lat), Number(lng)] : null;
 
   const [picked, setPicked] = useState(initial);
@@ -69,7 +57,10 @@ export const LocationPicker = ({ binLabel, lat, lng, onSave, onClose }) => {
     setState({ status: 'searching', message: '' });
 
     try {
-      const found = await search(query.trim(), controller.signal);
+      const found = await geocode(query, {
+        apiKey: settings.orsKey,
+        signal: controller.signal,
+      });
       setResults(found);
       setState(
         found.length
@@ -83,12 +74,12 @@ export const LocationPicker = ({ binLabel, lat, lng, onSave, onClose }) => {
   };
 
   const choose = (result) => {
-    const next = [Number(result.lat), Number(result.lon)];
+    const next = [result.lat, result.lng];
     setPicked(next);
     setCenter(next);
     setZoom(17);
     setResults([]);
-    setQuery(result.display_name);
+    setQuery(result.label);
   };
 
   const useMyLocation = () => {
@@ -164,13 +155,13 @@ export const LocationPicker = ({ binLabel, lat, lng, onSave, onClose }) => {
           {results.length > 0 && (
             <ul className="max-h-32 overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-700">
               {results.map((result) => (
-                <li key={result.place_id}>
+                <li key={`${result.lat},${result.lng},${result.label}`}>
                   <button
                     type="button"
                     onClick={() => choose(result)}
                     className="block w-full px-3 py-2 text-left text-[11px] text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800"
                   >
-                    {result.display_name}
+                    {result.label}
                   </button>
                 </li>
               ))}

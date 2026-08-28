@@ -1,9 +1,10 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { MapContainer, Marker, Popup, TileLayer, useMap } from 'react-leaflet';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { MapContainer, Marker, Polyline, Popup, TileLayer, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import { MapPin, Filter, Navigation, AlertTriangle } from 'lucide-react';
+import { MapPin, Filter, Navigation, AlertTriangle, Route, Loader2, X } from 'lucide-react';
 import { useEcoBin } from '../../context/EcoBinContext';
 import { STATUS, STATUS_META, suspiciousCoords } from '../../lib/telemetry';
+import { routeThrough, formatDistance, formatDuration } from '../../services/routing';
 import { Card, EmptyState, cx, Button } from '../ui/Primitives';
 
 const LEGEND = [
@@ -68,8 +69,13 @@ const SOURCE_LABEL = {
 };
 
 export const LiveBinMap = ({ height = 'h-[340px]', scrollZoom = false }) => {
-  const { bins, selectedBin, setSelectedChannelId, setPage, assignTruck } = useEcoBin();
+  const { bins, selectedBin, setSelectedChannelId, setPage, assignTruck, settings } = useEcoBin();
   const [filter, setFilter] = useState('ALL');
+  const [route, setRoute] = useState(null);
+  const [routeState, setRouteState] = useState({ status: 'idle', message: '' });
+  const routeAbort = useRef(null);
+
+  useEffect(() => () => routeAbort.current?.abort(), []);
 
   const visible = useMemo(
     () => (filter === 'ALL' ? bins : bins.filter((bin) => bin.status === filter)),
@@ -85,9 +91,40 @@ export const LiveBinMap = ({ height = 'h-[340px]', scrollZoom = false }) => {
     located.find((bin) => bin.channelId === selectedBin?.channelId) ??
     (located.length === 1 ? located[0] : null);
 
+  // Bins that still need emptying, fullest first — the order a truck would drive.
+  const queue = bins
+    .filter((bin) => bin.status === STATUS.FULL || bin.status === STATUS.ASSIGNED)
+    .filter((bin) => bin.lat !== null && bin.lng !== null)
+    .sort((a, b) => (b.fill ?? 0) - (a.fill ?? 0));
+
   const flagged = located
     .map((bin) => ({ bin, warning: suspiciousCoords(bin.lat, bin.lng) }))
     .filter((entry) => entry.warning);
+
+  const drawRoute = async () => {
+    routeAbort.current?.abort();
+    const controller = new AbortController();
+    routeAbort.current = controller;
+    setRouteState({ status: 'loading', message: '' });
+
+    try {
+      const result = await routeThrough(
+        queue.map((bin) => [bin.lat, bin.lng]),
+        { apiKey: settings.orsKey, signal: controller.signal },
+      );
+      setRoute(result);
+      setRouteState({ status: 'idle', message: '' });
+    } catch (error) {
+      if (error.name === 'AbortError') return;
+      setRouteState({ status: 'error', message: error.message });
+    }
+  };
+
+  const clearRoute = () => {
+    routeAbort.current?.abort();
+    setRoute(null);
+    setRouteState({ status: 'idle', message: '' });
+  };
 
   return (
     <Card className="flex flex-col overflow-hidden">
@@ -128,8 +165,36 @@ export const LiveBinMap = ({ height = 'h-[340px]', scrollZoom = false }) => {
               <option value={STATUS.OFFLINE}>Offline</option>
             </select>
           </div>
+
+          {queue.length >= 2 &&
+            (route ? (
+              <Button onClick={clearRoute} title="Hide the collection route">
+                <X className="h-3.5 w-3.5" /> {formatDistance(route.distanceM)} ·{' '}
+                {formatDuration(route.durationS)}
+              </Button>
+            ) : (
+              <Button
+                variant="primary"
+                onClick={drawRoute}
+                disabled={routeState.status === 'loading'}
+                title={`Driving route through ${queue.length} bins that need emptying`}
+              >
+                {routeState.status === 'loading' ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Route className="h-3.5 w-3.5" />
+                )}
+                Collection route
+              </Button>
+            ))}
         </div>
       </div>
+
+      {routeState.message && (
+        <p className="mx-4 mb-2 rounded-xl bg-rose-50 px-3 py-2 text-[11px] font-semibold text-rose-700 dark:bg-rose-500/10 dark:text-rose-300">
+          {routeState.message}
+        </p>
+      )}
 
       {flagged.length > 0 && (
         <div className="mx-4 mb-2 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-500/30 dark:bg-amber-500/10">
@@ -163,7 +228,15 @@ export const LiveBinMap = ({ height = 'h-[340px]', scrollZoom = false }) => {
               attribution='&copy; OpenStreetMap contributors'
               maxZoom={19}
             />
-            <FitBounds points={points} />
+            <FitBounds points={route ? route.path : points} />
+
+            {route && (
+              <>
+                {/* Casing under the line keeps it legible over busy streets. */}
+                <Polyline positions={route.path} color="#0f172a" weight={7} opacity={0.25} />
+                <Polyline positions={route.path} color="#0ea5e9" weight={4} opacity={0.95} />
+              </>
+            )}
             {located.map((bin) => (
               <Marker
                 key={bin.channelId}

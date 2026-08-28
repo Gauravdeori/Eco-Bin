@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Plus, Trash, RotateCcw, CheckCircle2, XCircle, Loader2, Radio, Map } from 'lucide-react';
+import { Plus, Trash, RotateCcw, CheckCircle2, XCircle, Loader2, Radio, Map, ShieldAlert } from 'lucide-react';
 import { useEcoBin } from '../../context/EcoBinContext';
 import { fetchChannelFeed } from '../../services/thingspeak';
 import { formatRelative, validCoords } from '../../lib/telemetry';
@@ -405,6 +405,28 @@ export const SettingsPage = () => {
                 className="w-full text-emerald-600"
               />
             </Field>
+
+            <div className="border-t border-slate-100 pt-3 dark:border-slate-800">
+              <Field
+                label="OpenRouteService API key"
+                hint="Optional. Powers address search in the location picker and the driving route between bins. Map tiles never need a key."
+              >
+                <input
+                  value={settings.orsKey}
+                  onChange={(event) => updateSettings({ orsKey: event.target.value.trim() })}
+                  placeholder="Paste your ORS key"
+                  className={inputClass}
+                />
+              </Field>
+
+              {settings.orsKey && (
+                <p className="mt-2 flex items-start gap-1.5 rounded-xl bg-amber-50 px-3 py-2 text-[11px] text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">
+                  <ShieldAlert className="mt-px h-3.5 w-3.5 shrink-0" />
+                  This is a browser app, so the key is readable by anyone who opens the site.
+                  Rotate it at openrouteservice.org if the quota gets abused.
+                </p>
+              )}
+            </div>
 
             <div className="border-t border-slate-100 pt-3 dark:border-slate-800">
               <Button variant="danger" onClick={resetSettings} className="w-full py-2.5">

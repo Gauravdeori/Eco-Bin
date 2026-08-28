@@ -59,6 +59,16 @@ export const DEFAULT_SETTINGS = {
   },
   /** Distance (in fill %) a reading must drop by to count as a collection. */
   collectionDropPercent: 25,
+
+  /**
+   * OpenRouteService key, used for address search and driving routes.
+   * Optional: without it, address search falls back to OSM Nominatim and the
+   * collection route is unavailable. Map tiles never need a key.
+   *
+   * This is a browser app, so whatever is set here ships in the bundle and can
+   * be read by anyone who loads the page. Use a key you are willing to expose.
+   */
+  orsKey: env.VITE_ORS_API_KEY ?? '',
   /** Per-channel labels the operator adds by hand: ward, road name, capacity. */
   binMeta: {},
 };
