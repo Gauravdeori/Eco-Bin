@@ -16,10 +16,10 @@ export const STATUS = {
 
 export const STATUS_META = {
   [STATUS.NORMAL]: { label: 'Normal', dot: 'bg-emerald-500', text: 'text-emerald-600', hex: '#10b981' },
-  [STATUS.FILLING]: { label: 'Filling', dot: 'bg-amber-500', text: 'text-amber-600', hex: '#f59e0b' },
+  [STATUS.FILLING]: { label: 'Filling', dot: 'bg-sky-500', text: 'text-sky-600', hex: '#0ea5e9' },
   [STATUS.FULL]: { label: 'Full', dot: 'bg-rose-500', text: 'text-rose-600', hex: '#f43f5e' },
   [STATUS.REPORTED]: { label: 'Reported', dot: 'bg-violet-500', text: 'text-violet-600', hex: '#8b5cf6' },
-  [STATUS.ASSIGNED]: { label: 'Assigned', dot: 'bg-sky-500', text: 'text-sky-600', hex: '#0ea5e9' },
+  [STATUS.ASSIGNED]: { label: 'Assigned', dot: 'bg-amber-500', text: 'text-amber-600', hex: '#f59e0b' },
   [STATUS.MAINTENANCE]: { label: 'Under Maintenance', dot: 'bg-slate-400', text: 'text-slate-600', hex: '#94a3b8' },
   [STATUS.OFFLINE]: { label: 'Offline', dot: 'bg-slate-400', text: 'text-slate-500', hex: '#94a3b8' },
 };

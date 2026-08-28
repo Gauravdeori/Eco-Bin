@@ -16,31 +16,26 @@ const LEGEND = [
   STATUS.MAINTENANCE,
 ];
 
-/** Marker built from a div so it can carry the fill number and a status colour. */
+/**
+ * Marker built from a div so it can carry the fill number and pulse in its
+ * status colour. Offline and maintenance bins are drawn static: a blink would
+ * suggest live telemetry that is not arriving.
+ */
 const markerIcon = (bin, selected) => {
   const meta = STATUS_META[bin.status];
   const label = bin.fill === null ? '?' : `${bin.fill}`;
+  const live = bin.status !== STATUS.OFFLINE && bin.status !== STATUS.MAINTENANCE;
+
   return L.divIcon({
     className: 'bin-marker',
     html: `
-      <div style="position:relative;display:flex;align-items:center;justify-content:center">
-        ${
-          bin.status === STATUS.FULL
-            ? `<span style="position:absolute;width:34px;height:34px;border-radius:9999px;background:${meta.hex};opacity:.28;animation:ping 1.4s cubic-bezier(0,0,.2,1) infinite"></span>`
-            : ''
-        }
-        <span style="
-          display:flex;align-items:center;justify-content:center;
-          width:30px;height:30px;border-radius:9999px;
-          background:${meta.hex};color:#fff;
-          font:700 10px/1 Inter,sans-serif;
-          border:2.5px solid ${selected ? '#0f172a' : '#fff'};
-          box-shadow:0 4px 12px rgba(15,23,42,.35);
-        ">${label}</span>
+      <div class="bin-pin${live ? '' : ' static'}" style="--pin:${meta.hex}">
+        ${live ? '<span class="halo"></span><span class="halo delayed"></span>' : ''}
+        <span class="dot" style="border-color:${selected ? '#0f172a' : '#fff'}">${label}</span>
       </div>`,
     iconSize: [30, 30],
     iconAnchor: [15, 15],
-    popupAnchor: [0, -16],
+    popupAnchor: [0, -18],
   });
 };
 

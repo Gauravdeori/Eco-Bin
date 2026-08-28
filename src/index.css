@@ -98,6 +98,66 @@
   border: 0;
 }
 
+/* Blinking bin markers ---------------------------------------------------- */
+/* Each pin carries its status colour as --pin, so one rule covers every state. */
+.bin-pin {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Expanding halo. */
+.bin-pin .halo {
+  position: absolute;
+  width: 30px;
+  height: 30px;
+  border-radius: 9999px;
+  background: var(--pin);
+  animation: bin-halo 1.6s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+/* Second halo, offset, so the pulse never fully stops. */
+.bin-pin .halo.delayed {
+  animation-delay: 0.8s;
+}
+
+.bin-pin .dot {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9999px;
+  background: var(--pin);
+  color: #fff;
+  font: 700 10px/1 Inter, sans-serif;
+  border: 2.5px solid #fff;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.35);
+  animation: bin-blink 1.6s ease-in-out infinite;
+}
+
+/* Bins that are not reporting sit still — a blink would imply live data. */
+.bin-pin.static .dot {
+  animation: none;
+}
+
+@keyframes bin-halo {
+  0% { transform: scale(1); opacity: 0.5; }
+  70%, 100% { transform: scale(2.4); opacity: 0; }
+}
+
+@keyframes bin-blink {
+  0%, 100% { transform: scale(1); filter: brightness(1); }
+  50% { transform: scale(1.14); filter: brightness(1.35); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bin-pin .halo { display: none; }
+  .bin-pin .dot { animation: none; }
+}
+
 /* Range inputs ----------------------------------------------------------- */
 /* accent-color alone leaves Chrome's dark default track, which reads as a bug
    next to the light cards. Style the track and thumb explicitly instead. */
