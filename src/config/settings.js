@@ -61,6 +61,16 @@ export const DEFAULT_SETTINGS = {
   collectionDropPercent: 25,
 
   /**
+   * Where the location picker opens when a bin has no coordinate yet.
+   * Set it to the city you operate in so you are not starting from a world map.
+   */
+  mapCenter: {
+    lat: num(env.VITE_MAP_CENTER_LAT, 26.1445),
+    lng: num(env.VITE_MAP_CENTER_LNG, 91.7362),
+    zoom: num(env.VITE_MAP_CENTER_ZOOM, 13),
+  },
+
+  /**
    * OpenRouteService key, used for address search and driving routes.
    * Optional: without it, address search falls back to OSM Nominatim and the
    * collection route is unavailable. Map tiles never need a key.
@@ -83,6 +93,7 @@ export const loadSettings = () => {
       ...saved,
       fieldMap: { ...DEFAULT_SETTINGS.fieldMap, ...(saved.fieldMap || {}) },
       thresholds: { ...DEFAULT_SETTINGS.thresholds, ...(saved.thresholds || {}) },
+      mapCenter: { ...DEFAULT_SETTINGS.mapCenter, ...(saved.mapCenter || {}) },
       binMeta: { ...DEFAULT_SETTINGS.binMeta, ...(saved.binMeta || {}) },
     };
   } catch {

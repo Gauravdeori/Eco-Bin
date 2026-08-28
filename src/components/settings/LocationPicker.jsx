@@ -34,12 +34,18 @@ const Recenter = ({ position, zoom }) => {
 };
 
 export const LocationPicker = ({ binLabel, lat, lng, onSave, onClose }) => {
-  const { settings } = useEcoBin();
+  const { settings, bins } = useEcoBin();
   const initial = validCoords(Number(lat), Number(lng)) ? [Number(lat), Number(lng)] : null;
 
+  // Fall back to a bin that is already placed, then to the configured centre.
+  const neighbour = bins.find((item) => item.lat !== null && item.lng !== null);
+  const fallback = neighbour
+    ? { position: [neighbour.lat, neighbour.lng], zoom: 15 }
+    : { position: [settings.mapCenter.lat, settings.mapCenter.lng], zoom: settings.mapCenter.zoom };
+
   const [picked, setPicked] = useState(initial);
-  const [center, setCenter] = useState(initial);
-  const [zoom, setZoom] = useState(initial ? 17 : 3);
+  const [center, setCenter] = useState(initial ?? fallback.position);
+  const [zoom, setZoom] = useState(initial ? 17 : fallback.zoom);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [state, setState] = useState({ status: 'idle', message: '' });
@@ -130,7 +136,7 @@ export const LocationPicker = ({ binLabel, lat, lng, onSave, onClose }) => {
               <input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="e.g. Kalina Kurla Road, Mumbai"
+                placeholder="Search a road, area or landmark"
                 className={cx(inputClass, 'pl-9')}
               />
             </div>
@@ -171,7 +177,7 @@ export const LocationPicker = ({ binLabel, lat, lng, onSave, onClose }) => {
 
         <div className="mx-5 h-[300px] overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700">
           <MapContainer
-            center={center ?? [20, 0]}
+            center={center}
             zoom={zoom}
             scrollWheelZoom
             className="h-full w-full"
