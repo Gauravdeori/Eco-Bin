@@ -128,40 +128,43 @@ const TrackingCard = ({ run, colour, onCancel, onFocusBin }) => {
   const band = PRIORITY_META[run.level];
 
   return (
-    <div className="pointer-events-auto w-[268px] rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-xl backdrop-blur dark:border-slate-700 dark:bg-slate-900/95">
-      <div className="flex items-center gap-2.5">
+    <div className="pointer-events-auto w-full rounded-xl border border-slate-200 bg-white/95 p-2.5 shadow-xl backdrop-blur dark:border-slate-700 dark:bg-slate-900/95">
+      <div className="flex items-center gap-2">
         <span
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-extrabold text-white"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-extrabold text-white"
           style={{ background: colour }}
         >
           {run.driver?.trim()?.[0]?.toUpperCase() ?? 'T'}
         </span>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-xs font-bold text-slate-900 dark:text-white">
+          <p className="truncate text-[11px] font-bold text-slate-900 dark:text-white">
             {run.driver || 'Driver'}
           </p>
-          <p className="flex items-center gap-1.5 truncate text-[11px] text-slate-500 dark:text-slate-400">
+          <p className="flex items-center gap-1 truncate text-[10px] text-slate-500 dark:text-slate-400">
             <span
-              className="shrink-0 rounded px-1 py-0.5 text-[9px] font-extrabold uppercase tracking-wide text-white"
+              className="shrink-0 rounded px-1 text-[8px] font-extrabold uppercase tracking-wide text-white"
               style={{ background: colour }}
             >
               {arrived ? 'Done' : band.label}
             </span>
-            {run.truckId} · {run.loadKg} kg
+            <span className="truncate">
+              {run.truckId}
+              {run.loadKg > 0 ? ` · ${run.loadKg} kg` : ''}
+            </span>
           </p>
         </div>
         <div className="shrink-0 text-right">
-          <p className="font-heading text-base font-extrabold tabular text-slate-900 dark:text-white">
+          <p className="font-heading text-sm font-extrabold tabular leading-tight text-slate-900 dark:text-white">
             {/* Under a minute reads better as a word than as "0 min". */}
             {arrived ? '—' : run.remainingS < 60 ? 'Now' : formatDuration(run.remainingS)}
           </p>
-          <p className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">
+          <p className="text-[8px] font-semibold uppercase tracking-wide text-slate-400">
             {arrived ? 'returning' : 'away'}
           </p>
         </div>
       </div>
 
-      <div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+      <div className="mt-2 h-1 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
         <span
           className="block h-full rounded-full transition-[width] duration-1000 ease-linear"
           style={{ width: `${Math.round(run.progress * 100)}%`, background: colour }}
@@ -171,19 +174,17 @@ const TrackingCard = ({ run, colour, onCancel, onFocusBin }) => {
       <button
         type="button"
         onClick={() => onFocusBin(run.stops[nextIndex])}
-        className="mt-2 flex w-full items-start gap-1.5 text-left"
+        className="mt-1.5 flex w-full items-start gap-1 text-left"
       >
-        <Navigation className="mt-px h-3 w-3 shrink-0" style={{ color: colour }} />
-        <span className="min-w-0 flex-1 text-[11px] leading-snug text-slate-600 dark:text-slate-300">
+        <Navigation className="mt-px h-2.5 w-2.5 shrink-0" style={{ color: colour }} />
+        <span className="min-w-0 flex-1 text-[10px] leading-snug text-slate-600 dark:text-slate-300">
           {arrived ? (
-            'All stops collected — heading back to the depot'
+            'All stops collected — heading back'
           ) : (
             <>
-              Next stop <b className="text-slate-900 dark:text-white">{run.stopNames[nextIndex]}</b>
-              {run.stops.length > 1 ? ` · ${run.stopsDone} of ${run.stops.length} done` : ''}
-              {run.criticalStops > 0
-                ? ` · ${run.criticalStops} critical left`
-                : ''}
+              <b className="text-slate-900 dark:text-white">{run.stopNames[nextIndex]}</b>
+              {run.stops.length > 1 ? ` · ${run.stopsDone}/${run.stops.length}` : ''}
+              {run.criticalStops > 0 ? ` · ${run.criticalStops} critical` : ''}
             </>
           )}
         </span>
@@ -192,7 +193,7 @@ const TrackingCard = ({ run, colour, onCancel, onFocusBin }) => {
       <button
         type="button"
         onClick={() => onCancel(run.truckId)}
-        className="mt-2 w-full rounded-lg bg-slate-100 py-1.5 text-[11px] font-bold text-slate-600 transition-colors hover:bg-rose-50 hover:text-rose-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-rose-500/10 dark:hover:text-rose-400"
+        className="mt-1.5 w-full rounded-md bg-slate-100 py-1 text-[10px] font-bold text-slate-600 transition-colors hover:bg-rose-50 hover:text-rose-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-rose-500/10 dark:hover:text-rose-400"
       >
         Call off {run.truckId}
       </button>
@@ -490,18 +491,20 @@ export const LiveBinMap = ({ height = 'h-[340px]', scrollZoom = false }) => {
       <div className={cx('relative mx-4 overflow-hidden rounded-xl', height)}>
         {/* What the lane colours mean. Only shown when there is a lane. */}
         {(fleetRuns.length > 0 || route) && (
-          <div className="pointer-events-none absolute bottom-3 right-3 z-[1000] rounded-xl border border-slate-200 bg-white/95 px-2.5 py-2 shadow-lg backdrop-blur dark:border-slate-700 dark:bg-slate-900/95">
-            <p className="mb-1 text-[9px] font-bold uppercase tracking-wide text-slate-400">
+          <div className="pointer-events-none absolute bottom-2.5 left-2.5 z-[1200] rounded-lg border border-slate-200 bg-white/95 px-2 py-1.5 shadow-lg backdrop-blur dark:border-slate-700 dark:bg-slate-900/95">
+            <p className="mb-1 text-[8px] font-bold uppercase tracking-wide text-slate-400">
               Route urgency
             </p>
-            <div className="flex flex-col gap-1">
+            {/* Wraps to one row on a wide map and two on a narrow one, rather
+                than always taking a tall column out of the view. */}
+            <div className="flex max-w-[188px] flex-wrap gap-x-2 gap-y-0.5">
               {ROUTE_ORDER.map((level) => (
-                <span key={level} className="flex items-center gap-1.5">
+                <span key={level} className="flex items-center gap-1">
                   <span
-                    className="h-1 w-5 shrink-0 rounded-full"
+                    className="h-1 w-3 shrink-0 rounded-full"
                     style={{ background: PRIORITY_META[level].hex }}
                   />
-                  <span className="text-[10px] font-semibold text-slate-600 dark:text-slate-300">
+                  <span className="text-[9px] font-semibold text-slate-600 dark:text-slate-300">
                     {PRIORITY_META[level].label}
                   </span>
                 </span>
@@ -512,7 +515,7 @@ export const LiveBinMap = ({ height = 'h-[340px]', scrollZoom = false }) => {
 
         {/* Live tracking, floated over the map like a ride-hailing app. */}
         {fleetRuns.length > 0 && (
-          <div className="pointer-events-none absolute left-3 top-3 z-[1000] flex max-h-[calc(100%-24px)] flex-col gap-2 overflow-y-auto">
+          <div className="pointer-events-none absolute right-2.5 top-2.5 z-[1200] flex max-h-[calc(100%-20px)] w-[min(228px,calc(100%-20px))] flex-col gap-1.5 overflow-y-auto">
             {fleetRuns.map((run) => (
               <TrackingCard
                 key={run.truckId}
