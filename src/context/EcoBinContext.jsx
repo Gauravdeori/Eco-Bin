@@ -10,6 +10,7 @@ import React, {
 import { loadSettings, saveSettings, DEFAULT_SETTINGS } from '../config/settings';
 import { useThingSpeak } from '../hooks/useThingSpeak';
 import { useLocalState } from '../hooks/useLocalState';
+import { simulatedBins } from '../lib/simulation';
 import {
   STATUS,
   applyOverlays,
@@ -90,20 +91,55 @@ export const EcoBinProvider = ({ children }) => {
     [setAlerts],
   );
 
+  /**
+   * Simulated bins move with the clock, so they need their own heartbeat: with
+   * no real channel connected nothing else re-renders and the demo fleet would
+   * sit frozen at whatever it read on load.
+   */
+  const [simNow, setSimNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!settings.simulation?.enabled) return undefined;
+    const id = setInterval(
+      () => setSimNow(Date.now()),
+      Math.max(5, settings.pollSeconds) * 1000,
+    );
+    return () => clearInterval(id);
+  }, [settings.simulation?.enabled, settings.pollSeconds]);
+
   /* ── raw feeds → bins ───────────────────────────────────────────────────── */
-  const telemetryBins = useMemo(
-    () =>
-      results.map((result, index) =>
-        buildBin(result, {
-          index,
-          fieldMap: settings.fieldMap,
-          thresholds: settings.thresholds,
-          collectionDropPercent: settings.collectionDropPercent,
-          binMeta: settings.binMeta,
-        }),
-      ),
-    [results, settings.fieldMap, settings.thresholds, settings.collectionDropPercent, settings.binMeta],
-  );
+  const telemetryBins = useMemo(() => {
+    const live = results.map((result, index) =>
+      buildBin(result, {
+        index,
+        fieldMap: settings.fieldMap,
+        thresholds: settings.thresholds,
+        collectionDropPercent: settings.collectionDropPercent,
+        binMeta: settings.binMeta,
+      }),
+    );
+
+    if (!settings.simulation?.enabled) return live;
+
+    // Simulated bins sit after the real ones so a live channel always ranks
+    // first in the list and keeps index 0 in the map's fallback centring.
+    return [
+      ...live,
+      ...simulatedBins({
+        centre: settings.mapCenter,
+        thresholds: settings.thresholds,
+        now: simNow,
+      }),
+    ];
+  }, [
+    results,
+    simNow,
+    settings.fieldMap,
+    settings.thresholds,
+    settings.collectionDropPercent,
+    settings.binMeta,
+    settings.simulation?.enabled,
+    settings.mapCenter,
+  ]);
 
   const bins = useMemo(
     () => telemetryBins.map((bin) => applyOverlays(bin, { assignments, maintenance, reports })),

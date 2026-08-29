@@ -241,3 +241,38 @@ input[type='range']::-moz-range-thumb {
     animation: none !important;
   }
 }
+
+/* Route sequence badge --------------------------------------------------- */
+/* Shown on a pin only while a planned route is on the map, so the driving
+   order is readable off the map itself rather than from a list beside it. */
+.bin-pin .seq {
+  position: absolute;
+  top: -7px;
+  right: -9px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 3px;
+  border-radius: 9999px;
+  background: #0f172a;
+  color: #fff;
+  font: 800 10px/17px Inter, sans-serif;
+  text-align: center;
+  border: 2px solid #fff;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.4);
+  pointer-events: none;
+}
+
+/* Depot marker ----------------------------------------------------------- */
+.depot-pin {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #fff;
+  font: 800 9px/1 Inter, sans-serif;
+  border: 2.5px solid #fff;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.45);
+}

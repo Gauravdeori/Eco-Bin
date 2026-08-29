@@ -3,6 +3,8 @@ import { Plus, Trash, RotateCcw, CheckCircle2, XCircle, Loader2, Radio, Map, Shi
 import { useEcoBin } from '../../context/EcoBinContext';
 import { fetchChannelFeed } from '../../services/thingspeak';
 import { formatRelative, validCoords } from '../../lib/telemetry';
+import { SIMULATED_COUNT } from '../../lib/simulation';
+import { DIESEL_KG_CO2_PER_LITRE } from '../../lib/emissions';
 import { Card, CardHeader, EmptyState, Field, Button, inputClass, cx } from '../ui/Primitives';
 import { LocationPicker } from '../settings/LocationPicker';
 
@@ -334,6 +336,97 @@ export const SettingsPage = () => {
                 </select>
               </div>
             ))}
+          </div>
+        </Card>
+
+        <Card>
+          <CardHeader
+            title="Collection runs"
+            subtitle="Where trucks start from, and what the CO₂ figures assume"
+          />
+          <div className="space-y-3 px-5 pb-5">
+            <label className="flex items-start gap-3 rounded-xl bg-slate-50 p-3 dark:bg-slate-800/60">
+              <input
+                type="checkbox"
+                checked={settings.simulation?.enabled ?? false}
+                onChange={(event) =>
+                  updateSettings((current) => ({
+                    ...current,
+                    simulation: { ...current.simulation, enabled: event.target.checked },
+                  }))
+                }
+                className="mt-0.5 h-4 w-4 shrink-0 accent-emerald-600"
+              />
+              <span className="min-w-0">
+                <span className="block text-xs font-bold text-slate-900 dark:text-white">
+                  Include {SIMULATED_COUNT} simulated bins
+                </span>
+                <span className="mt-0.5 block text-[11px] text-slate-500 dark:text-slate-400">
+                  Demo bins around the map centre, so routing and ranking have something to work
+                  with before the hardware is live. They are badged SIM everywhere and sit
+                  alongside your real channels. Turn this off for a production dashboard.
+                </span>
+              </span>
+            </label>
+
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Depot latitude" hint="Blank uses the map centre.">
+                <input
+                  type="number"
+                  step="0.00001"
+                  value={settings.depot?.lat ?? ''}
+                  placeholder={String(settings.mapCenter.lat)}
+                  onChange={(event) =>
+                    updateSettings((current) => ({
+                      ...current,
+                      depot: {
+                        ...current.depot,
+                        lat: event.target.value === '' ? null : Number(event.target.value),
+                      },
+                    }))
+                  }
+                  className={inputClass}
+                />
+              </Field>
+              <Field label="Depot longitude" hint="Runs start and end here.">
+                <input
+                  type="number"
+                  step="0.00001"
+                  value={settings.depot?.lng ?? ''}
+                  placeholder={String(settings.mapCenter.lng)}
+                  onChange={(event) =>
+                    updateSettings((current) => ({
+                      ...current,
+                      depot: {
+                        ...current.depot,
+                        lng: event.target.value === '' ? null : Number(event.target.value),
+                      },
+                    }))
+                  }
+                  className={inputClass}
+                />
+              </Field>
+            </div>
+
+            <Field
+              label="Truck fuel economy (km per litre)"
+              hint={`Refuse trucks manage roughly 2.5–3. Diesel releases ${DIESEL_KG_CO2_PER_LITRE} kg CO₂ per litre burnt.`}
+            >
+              <input
+                type="number"
+                min="0.5"
+                max="20"
+                step="0.1"
+                value={settings.fleet?.kmPerLitre ?? ''}
+                onChange={(event) =>
+                  updateSettings((current) => ({
+                    ...current,
+                    fleet: { ...current.fleet, kmPerLitre: Number(event.target.value) || 2.8 },
+                  }))
+                }
+                className={inputClass}
+              />
+            </Field>
           </div>
         </Card>
 

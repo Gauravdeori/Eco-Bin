@@ -5,6 +5,8 @@
  * build-time `.env` values, so a channel can be swapped without a rebuild.
  */
 
+import { DEFAULT_KM_PER_LITRE } from '../lib/emissions';
+
 const STORAGE_KEY = 'ecobin.settings.v1';
 
 const env = import.meta.env;
@@ -76,6 +78,28 @@ export const DEFAULT_SETTINGS = {
   },
 
   /**
+   * Simulated bins, so the dashboard can demonstrate routing and ranking
+   * without a shelf of hardware. They sit alongside any real channels rather
+   * than replacing them, are flagged `isSimulated`, and are badged everywhere
+   * they appear — the rest of this app only ever shows numbers a device sent,
+   * and a simulated bin is only allowed to break that because it says so.
+   */
+  simulation: { enabled: true },
+
+  /**
+   * Where a collection run starts and ends. Falls back to the map centre,
+   * which is the closest thing to a depot the app knows about until one is set.
+   */
+  depot: { lat: null, lng: null },
+
+  /**
+   * Fleet fuel economy, used for the fuel and CO₂ figures on a planned route.
+   * Refuse trucks are heavy and stop constantly, so this is far lower than a
+   * road vehicle: see src/lib/emissions.js for the arithmetic.
+   */
+  fleet: { kmPerLitre: DEFAULT_KM_PER_LITRE },
+
+  /**
    * Where the location picker opens when a bin has no coordinate yet.
    * Set it to the city you operate in so you are not starting from a world map.
    */
@@ -109,6 +133,9 @@ export const loadSettings = () => {
       fieldMap: { ...DEFAULT_SETTINGS.fieldMap, ...(saved.fieldMap || {}) },
       thresholds: { ...DEFAULT_SETTINGS.thresholds, ...(saved.thresholds || {}) },
       autoDispatch: { ...DEFAULT_SETTINGS.autoDispatch, ...(saved.autoDispatch || {}) },
+      simulation: { ...DEFAULT_SETTINGS.simulation, ...(saved.simulation || {}) },
+      depot: { ...DEFAULT_SETTINGS.depot, ...(saved.depot || {}) },
+      fleet: { ...DEFAULT_SETTINGS.fleet, ...(saved.fleet || {}) },
       mapCenter: { ...DEFAULT_SETTINGS.mapCenter, ...(saved.mapCenter || {}) },
       binMeta: { ...DEFAULT_SETTINGS.binMeta, ...(saved.binMeta || {}) },
     };

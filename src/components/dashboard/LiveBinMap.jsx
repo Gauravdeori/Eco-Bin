@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { MapContainer, Marker, Polyline, Popup, TileLayer, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import { MapPin, Filter, Navigation, AlertTriangle, Route, Loader2, X } from 'lucide-react';
+import { MapPin, Filter, Navigation, AlertTriangle, Route, Loader2, X, Leaf } from 'lucide-react';
 import { useEcoBin } from '../../context/EcoBinContext';
 import { STATUS, STATUS_META, suspiciousCoords } from '../../lib/telemetry';
-import { routeThrough, formatDistance, formatDuration } from '../../services/routing';
+import { planRoute, formatDistance, formatDuration } from '../../services/routing';
+import { emissionsFor, emissionsSaved, formatCo2 } from '../../lib/emissions';
 import { Card, EmptyState, cx, Button } from '../ui/Primitives';
 
 const LEGEND = [
@@ -29,7 +30,7 @@ const escapeHtml = (value) =>
  * status colour. Offline and maintenance bins are drawn static: a blink would
  * suggest live telemetry that is not arriving.
  */
-const markerIcon = (bin, selected) => {
+const markerIcon = (bin, selected, seq = null) => {
   const meta = STATUS_META[bin.status];
   const label = bin.fill === null ? '?' : `${bin.fill}`;
   const live = bin.status !== STATUS.OFFLINE && bin.status !== STATUS.MAINTENANCE;
@@ -40,6 +41,7 @@ const markerIcon = (bin, selected) => {
       <div class="bin-pin${live ? '' : ' static'}" style="--pin:${meta.hex}">
         ${live ? '<span class="halo"></span><span class="halo delayed"></span>' : ''}
         <span class="dot" style="border-color:${selected ? '#0f172a' : '#fff'}">${label}</span>
+        ${seq === null ? '' : `<span class="seq">${seq}</span>`}
         <span class="name">${escapeHtml(bin.id)}</span>
       </div>`,
     iconSize: [30, 30],
@@ -47,6 +49,15 @@ const markerIcon = (bin, selected) => {
     popupAnchor: [0, -18],
   });
 };
+
+const depotIcon = () =>
+  L.divIcon({
+    className: 'depot-marker',
+    html: '<div class="depot-pin">HQ</div>',
+    iconSize: [26, 26],
+    iconAnchor: [13, 13],
+    popupAnchor: [0, -14],
+  });
 
 /** Keeps every visible bin inside the viewport as coordinates arrive. */
 const FitBounds = ({ points }) => {
@@ -70,6 +81,14 @@ const FitBounds = ({ points }) => {
   return null;
 };
 
+/** One figure in the route summary bar. */
+const Metric = ({ label, value }) => (
+  <span className="flex flex-col">
+    <span className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">{label}</span>
+    <span className="text-xs font-extrabold text-slate-900 tabular dark:text-white">{value}</span>
+  </span>
+);
+
 const SOURCE_LABEL = {
   device: 'live GPS',
   manual: 'set in Settings',
@@ -79,6 +98,7 @@ const SOURCE_LABEL = {
 export const LiveBinMap = ({ height = 'h-[340px]', scrollZoom = false }) => {
   const { bins, selectedBin, setSelectedChannelId, setPage, assignTruck, settings } = useEcoBin();
   const [filter, setFilter] = useState('ALL');
+  const [scope, setScope] = useState('DUE');
   const [route, setRoute] = useState(null);
   const [routeState, setRouteState] = useState({ status: 'idle', message: '' });
   const routeAbort = useRef(null);
@@ -99,11 +119,43 @@ export const LiveBinMap = ({ height = 'h-[340px]', scrollZoom = false }) => {
     located.find((bin) => bin.channelId === selectedBin?.channelId) ??
     (located.length === 1 ? located[0] : null);
 
-  // Bins that still need emptying, fullest first — the order a truck would drive.
-  const queue = bins
-    .filter((bin) => bin.status === STATUS.FULL || bin.status === STATUS.ASSIGNED)
-    .filter((bin) => bin.lat !== null && bin.lng !== null)
-    .sort((a, b) => (b.fill ?? 0) - (a.fill ?? 0));
+  /**
+   * The stops a run would cover, fullest first.
+   *
+   * That order is the baseline, not the plan: it is what an operator driving
+   * "deal with the worst one next" would actually do, and it ignores geography
+   * entirely. The optimiser is measured against it.
+   */
+  const queue = useMemo(() => {
+    const positioned = bins.filter((bin) => bin.lat !== null && bin.lng !== null);
+    const due = positioned.filter(
+      (bin) => bin.status === STATUS.FULL || bin.status === STATUS.ASSIGNED,
+    );
+    return [...(scope === 'ALL' ? positioned : due)].sort((a, b) => (b.fill ?? 0) - (a.fill ?? 0));
+  }, [bins, scope]);
+
+  // Runs start and end at the depot; the map centre stands in until one is set.
+  const depot = useMemo(() => {
+    const { lat, lng } = settings.depot ?? {};
+    if (lat !== null && lat !== undefined && lng !== null && lng !== undefined) return [lat, lng];
+    return [settings.mapCenter.lat, settings.mapCenter.lng];
+  }, [settings.depot, settings.mapCenter]);
+
+  /** channelId → its position in the planned run, for the pin badges. */
+  const sequence = useMemo(() => {
+    const map = new Map();
+    route?.bins?.forEach((bin, index) => map.set(bin.channelId, index + 1));
+    return map;
+  }, [route]);
+
+  const savings = route
+    ? emissionsSaved(
+        route.plannedDistanceM,
+        route.unorderedDistanceM,
+        settings.fleet?.kmPerLitre,
+      )
+    : null;
+  const runCo2 = route ? emissionsFor(route.distanceM, settings.fleet?.kmPerLitre) : null;
 
   const flagged = located
     .map((bin) => ({ bin, warning: suspiciousCoords(bin.lat, bin.lng) }))
@@ -116,11 +168,11 @@ export const LiveBinMap = ({ height = 'h-[340px]', scrollZoom = false }) => {
     setRouteState({ status: 'loading', message: '' });
 
     try {
-      const result = await routeThrough(
+      const result = await planRoute(
         queue.map((bin) => [bin.lat, bin.lng]),
-        { apiKey: settings.orsKey, signal: controller.signal },
+        { apiKey: settings.orsKey, signal: controller.signal, depot },
       );
-      setRoute(result);
+      setRoute({ ...result, bins: result.stopOrder.map((index) => queue[index]) });
       setRouteState({ status: 'idle', message: '' });
     } catch (error) {
       if (error.name === 'AbortError') return;
@@ -174,25 +226,40 @@ export const LiveBinMap = ({ height = 'h-[340px]', scrollZoom = false }) => {
             </select>
           </div>
 
+          <div className="relative">
+            <Route className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+            <select
+              value={scope}
+              onChange={(event) => {
+                setScope(event.target.value);
+                clearRoute();
+              }}
+              aria-label="Which bins to plan a run through"
+              className="appearance-none rounded-xl border border-slate-200 bg-white py-2 pl-8 pr-7 text-xs font-semibold text-slate-700 focus:border-brand-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+            >
+              <option value="DUE">Bins due collection</option>
+              <option value="ALL">Every positioned bin</option>
+            </select>
+          </div>
+
           {queue.length >= 2 &&
             (route ? (
-              <Button onClick={clearRoute} title="Hide the collection route">
-                <X className="h-3.5 w-3.5" /> {formatDistance(route.distanceM)} ·{' '}
-                {formatDuration(route.durationS)}
+              <Button onClick={clearRoute} title="Hide the planned run">
+                <X className="h-3.5 w-3.5" /> Clear route
               </Button>
             ) : (
               <Button
                 variant="primary"
                 onClick={drawRoute}
                 disabled={routeState.status === 'loading'}
-                title={`Driving route through ${queue.length} bins that need emptying`}
+                title={`Plan the shortest run through ${queue.length} bins`}
               >
                 {routeState.status === 'loading' ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 ) : (
                   <Route className="h-3.5 w-3.5" />
                 )}
-                Collection route
+                Plan run ({queue.length})
               </Button>
             ))}
         </div>
@@ -202,6 +269,43 @@ export const LiveBinMap = ({ height = 'h-[340px]', scrollZoom = false }) => {
         <p className="mx-4 mb-2 rounded-xl bg-rose-50 px-3 py-2 text-[11px] font-semibold text-rose-700 dark:bg-rose-500/10 dark:text-rose-300">
           {routeState.message}
         </p>
+      )}
+
+      {route && (
+        <div className="mx-4 mb-2 rounded-xl border border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800/60">
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-3.5 py-2.5">
+            <Metric label="Stops" value={String(route.bins.length)} />
+            <Metric label="Distance" value={formatDistance(route.distanceM)} />
+            <Metric label="Drive time" value={formatDuration(route.durationS)} />
+            <Metric label="Diesel" value={`${runCo2.litres.toFixed(1)} L`} />
+            <Metric label="CO₂ this run" value={formatCo2(runCo2.co2Kg)} />
+            {savings.co2Kg > 0.05 && (
+              <span className="flex items-center gap-1.5 rounded-lg bg-emerald-50 px-2 py-1 dark:bg-emerald-500/10">
+                <Leaf className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300">
+                  {formatCo2(savings.co2Kg)} CO₂ saved
+                  <span className="font-semibold opacity-80">
+                    {' '}
+                    · {formatDistance(savings.metres)} shorter ({savings.percent}%)
+                  </span>
+                </span>
+              </span>
+            )}
+          </div>
+
+          <p className="border-t border-slate-200 px-3.5 py-1.5 text-[10px] leading-relaxed text-slate-500 dark:border-slate-700 dark:text-slate-400">
+            {route.bins.map((bin, index) => `${index + 1}. ${bin.id}`).join('  ·  ')}
+            {route.roundTrip ? '  ·  back to depot' : ''}
+          </p>
+
+          <p className="border-t border-slate-200 px-3.5 py-1.5 text-[10px] text-slate-400 dark:border-slate-700">
+            {route.source === 'road'
+              ? 'Ordered on real driving times from OpenRouteService'
+              : 'Ordered on straight-line distance — add an OpenRouteService key for road-accurate ordering'}
+            {route.followsRoads ? '' : '; drawn as direct lines'}
+            {`. Saving is against collecting fullest-first. CO₂ at ${(settings.fleet?.kmPerLitre ?? 2.8)} km/L diesel.`}
+          </p>
+        </div>
       )}
 
       {flagged.length > 0 && (
@@ -245,17 +349,44 @@ export const LiveBinMap = ({ height = 'h-[340px]', scrollZoom = false }) => {
                 <Polyline positions={route.path} color="#0ea5e9" weight={4} opacity={0.95} />
               </>
             )}
+            {route && (
+              <Marker position={depot} icon={depotIcon()}>
+                <Popup>
+                  <div className="p-3">
+                    <p className="font-heading text-sm font-extrabold text-slate-900">Depot</p>
+                    <p className="mt-0.5 text-[11px] text-slate-500">
+                      Runs start and end here.
+                      {settings.depot?.lat === null || settings.depot?.lat === undefined
+                        ? ' Using the map centre — set a depot in Settings.'
+                        : ''}
+                    </p>
+                  </div>
+                </Popup>
+              </Marker>
+            )}
+
             {located.map((bin) => (
               <Marker
                 key={bin.channelId}
                 position={[bin.lat, bin.lng]}
-                icon={markerIcon(bin, selectedBin?.channelId === bin.channelId)}
+                icon={markerIcon(
+                  bin,
+                  selectedBin?.channelId === bin.channelId,
+                  sequence.get(bin.channelId) ?? null,
+                )}
                 eventHandlers={{ click: () => setSelectedChannelId(bin.channelId) }}
               >
                 <Popup>
                   <div className="min-w-[190px] p-3">
                     <div className="flex items-center justify-between gap-2">
-                      <p className="font-heading text-sm font-extrabold text-slate-900">{bin.id}</p>
+                      <p className="flex items-center gap-1.5 font-heading text-sm font-extrabold text-slate-900">
+                        {bin.id}
+                        {bin.isSimulated && (
+                          <span className="rounded bg-slate-200 px-1 py-0.5 text-[8px] font-extrabold uppercase tracking-wide text-slate-600">
+                            Sim
+                          </span>
+                        )}
+                      </p>
                       <span
                         className="rounded-full px-2 py-0.5 text-[10px] font-bold text-white"
                         style={{ background: STATUS_META[bin.status].hex }}
@@ -263,7 +394,12 @@ export const LiveBinMap = ({ height = 'h-[340px]', scrollZoom = false }) => {
                         {STATUS_META[bin.status].label}
                       </span>
                     </div>
-                    <p className="mt-0.5 text-[11px] text-slate-500">{bin.location}</p>
+                    <p className="mt-0.5 text-[11px] text-slate-500">
+                      {sequence.has(bin.channelId) && (
+                        <b className="text-slate-900">Stop {sequence.get(bin.channelId)} · </b>
+                      )}
+                      {bin.location}
+                    </p>
                     <p className="mt-0.5 font-mono text-[10px] text-slate-400">
                       {bin.lat.toFixed(5)}, {bin.lng.toFixed(5)}
                       {bin.positionSource ? ` · ${SOURCE_LABEL[bin.positionSource]}` : ''}
