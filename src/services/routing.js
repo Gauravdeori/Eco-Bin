@@ -9,6 +9,13 @@
  */
 
 const ORS = 'https://api.openrouteservice.org';
+/**
+ * OSRM's public demo server. No key, no sign-up, and it answers with real
+ * road geometry, which is what makes a route look like a route out of the
+ * box. It is a courtesy service with no uptime promise, so a configured
+ * OpenRouteService key is always preferred over it.
+ */
+const OSRM = 'https://router.project-osrm.org';
 const NOMINATIM = 'https://nominatim.openstreetmap.org/search';
 
 export class RoutingError extends Error {
@@ -109,6 +116,69 @@ export const routeThrough = async (stops, { apiKey, signal } = {}) => {
   };
 };
 
+/** OSRM wants `lng,lat` pairs joined by semicolons. */
+const osrmPath = (stops) => stops.map(([lat, lng]) => `${lng},${lat}`).join(';');
+
+/** Keyless road route through the stops, in order. */
+export const osrmRoute = async (stops, { signal } = {}) => {
+  const response = await fetch(
+    `${OSRM}/route/v1/driving/${osrmPath(stops)}?overview=full&geometries=geojson`,
+    { signal, headers: { Accept: 'application/json' } },
+  );
+  if (!response.ok) throw new RoutingError(`OSRM returned ${response.status}.`);
+
+  const body = await response.json();
+  const route = body.routes?.[0];
+  if (!route?.geometry?.coordinates) {
+    throw new RoutingError('No road route found between those stops.');
+  }
+
+  return {
+    path: route.geometry.coordinates.map(([lng, lat]) => [lat, lng]),
+    distanceM: route.distance ?? 0,
+    durationS: route.duration ?? 0,
+  };
+};
+
+/** Keyless driving-time matrix. */
+export const osrmTable = async (locations, { signal } = {}) => {
+  const response = await fetch(
+    `${OSRM}/table/v1/driving/${osrmPath(locations)}?annotations=duration,distance`,
+    { signal, headers: { Accept: 'application/json' } },
+  );
+  if (!response.ok) throw new RoutingError(`OSRM returned ${response.status}.`);
+
+  const body = await response.json();
+  if (!Array.isArray(body.durations) || !Array.isArray(body.distances)) {
+    throw new RoutingError('OSRM returned no matrix.');
+  }
+  return { durations: body.durations, distances: body.distances };
+};
+
+/**
+ * Road geometry from whichever provider can supply it.
+ *
+ * A configured OpenRouteService key comes first because it is the operator's
+ * own quota and carries an actual service promise. OSRM is the fallback rather
+ * than nothing at all: drawing straight lines between bins when a road network
+ * is one keyless request away made the map look broken, and hid a working key
+ * that the app simply was not reading.
+ */
+export const roadRoute = async (stops, { apiKey, signal } = {}) => {
+  if (apiKey) {
+    try {
+      const route = await routeThrough(stops, { apiKey, signal });
+      return { ...route, provider: 'openrouteservice' };
+    } catch (error) {
+      if (error?.name === 'AbortError') throw error;
+      // Fall through and try the keyless router.
+    }
+  }
+
+  const route = await osrmRoute(stops, { signal });
+  return { ...route, provider: 'osrm' };
+};
+
 export const formatDistance = (metres) =>
   metres >= 1000 ? `${(metres / 1000).toFixed(1)} km` : `${Math.round(metres)} m`;
 
@@ -166,6 +236,15 @@ export const costMatrix = async (locations, { apiKey, signal } = {}) => {
       throw new RoutingError(await explain(response));
     }
     // Any other failure is not worth losing the route over — fall through.
+  }
+
+  // No key, or ORS could not answer: real driving times are still available
+  // without one, and they order the stops far better than crow-flies distance.
+  try {
+    const table = await osrmTable(locations, { signal });
+    return { ...table, source: 'road' };
+  } catch (error) {
+    if (error?.name === 'AbortError') throw error;
   }
 
   const distances = locations.map((from) => locations.map((to) => haversineM(from, to)));
@@ -304,13 +383,11 @@ export const planRoute = async (stops, { apiKey, signal, depot = null } = {}) =>
   const waypoints = roundTrip ? [...ordered, locations[0]] : ordered;
 
   let drawn = null;
-  if (apiKey) {
-    try {
-      drawn = await routeThrough(waypoints, { apiKey, signal });
-    } catch (error) {
-      if (error.name === 'AbortError') throw error;
-      // Keep the plan; fall back to drawing straight legs between stops.
-    }
+  try {
+    drawn = await roadRoute(waypoints, { apiKey, signal });
+  } catch (error) {
+    if (error?.name === 'AbortError') throw error;
+    // Keep the plan; fall back to drawing straight legs between stops.
   }
 
   return {
@@ -318,6 +395,7 @@ export const planRoute = async (stops, { apiKey, signal, depot = null } = {}) =>
     stopOrder: (roundTrip ? order.slice(1) : order).map((index) => (roundTrip ? index - 1 : index)),
     path: drawn?.path ?? waypoints,
     followsRoads: Boolean(drawn),
+    provider: drawn?.provider ?? null,
     distanceM: drawn?.distanceM ?? planned.distanceM,
     durationS: drawn?.durationS ?? planned.durationS,
     /** Both measured on the matrix, so the saving is a like-for-like figure. */

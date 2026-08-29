@@ -130,6 +130,16 @@ export const loadSettings = () => {
     return {
       ...DEFAULT_SETTINGS,
       ...saved,
+      /**
+       * A blank saved key must not hide a configured one.
+       *
+       * Saving anything on the Settings page writes the whole object, so a
+       * visit made before the key was put in `.env` stored `orsKey: ''` — and
+       * because saved values win over defaults, that empty string then masked
+       * the real key for good. Routes quietly fell back to straight lines with
+       * a perfectly valid key sitting in the file.
+       */
+      orsKey: saved.orsKey?.trim() ? saved.orsKey : DEFAULT_SETTINGS.orsKey,
       fieldMap: { ...DEFAULT_SETTINGS.fieldMap, ...(saved.fieldMap || {}) },
       thresholds: { ...DEFAULT_SETTINGS.thresholds, ...(saved.thresholds || {}) },
       autoDispatch: { ...DEFAULT_SETTINGS.autoDispatch, ...(saved.autoDispatch || {}) },

@@ -448,11 +448,21 @@ export const LiveBinMap = ({ height = 'h-[340px]', scrollZoom = false }) => {
             {route.roundTrip ? '  ·  back to depot' : ''}
           </p>
 
+          {/* Straight lines are a fallback, not a route. Say so plainly rather
+              than leaving the map looking broken with no explanation. */}
+          {!route.followsRoads && (
+            <p className="border-t border-slate-200 px-3.5 py-1.5 text-[10px] font-semibold text-amber-700 dark:border-slate-700 dark:text-amber-400">
+              Drawn as direct lines — no routing service could be reached. The stop
+              order is still correct; only the shape of the lane is approximate.
+            </p>
+          )}
+
           <p className="border-t border-slate-200 px-3.5 py-1.5 text-[10px] text-slate-400 dark:border-slate-700">
             {route.source === 'road'
-              ? 'Ordered on real driving times from OpenRouteService'
-              : 'Ordered on straight-line distance — add an OpenRouteService key for road-accurate ordering'}
-            {route.followsRoads ? '' : '; drawn as direct lines'}
+              ? `Ordered on real driving times${
+                  route.provider === 'osrm' ? ' (OSRM)' : ' (OpenRouteService)'
+                }`
+              : 'Ordered on straight-line distance — no routing service could be reached'}
             {`. Saving is against collecting fullest-first. CO₂ at ${(settings.fleet?.kmPerLitre ?? 2.8)} km/L diesel.`}
           </p>
         </div>
