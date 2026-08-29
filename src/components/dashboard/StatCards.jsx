@@ -1,6 +1,7 @@
 import React from 'react';
-import { Trash2, AlertTriangle, ShieldAlert, Truck } from 'lucide-react';
+import { Trash2, AlertTriangle, ShieldAlert, Truck, Scale } from 'lucide-react';
 import { useEcoBin } from '../../context/EcoBinContext';
+import { formatNumber } from '../../lib/telemetry';
 import { Card, cx } from '../ui/Primitives';
 
 const Stat = ({ label, value, sub, icon: Icon, tone }) => (
@@ -52,14 +53,30 @@ export const StatCards = () => {
 
   const online = bins.filter((bin) => !bin.isOffline).length;
 
+  // What the load reading is measured against: capacity when every weighed bin
+  // has one, otherwise just how many bins are on the scale.
+  const weightSub = (() => {
+    if (stats.totalWeight === null) return 'No device is publishing weight';
+    if (stats.totalCapacity)
+      return `${Math.min(100, Math.round((stats.totalWeight / stats.totalCapacity) * 100))}% of ${formatNumber(stats.totalCapacity, ' kg')} capacity`;
+    return `${stats.weighedBins} of ${stats.totalBins} bin${stats.totalBins === 1 ? '' : 's'} on the scale`;
+  })();
+
   return (
-    <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
+    <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5">
       <Stat
         label="Total Bins"
         value={stats.totalBins}
         sub={`${online} reporting · ${settings.channels.length} channel${settings.channels.length === 1 ? '' : 's'}`}
         icon={Trash2}
         tone={TONES.neutral}
+      />
+      <Stat
+        label="Live Weight"
+        value={formatNumber(stats.totalWeight, ' kg')}
+        sub={weightSub}
+        icon={Scale}
+        tone={TONES.info}
       />
       <Stat
         label="Full Bins"

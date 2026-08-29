@@ -215,6 +215,20 @@ export const EcoBinProvider = ({ children }) => {
 
     const trucksOnRoute = trucks.filter((truck) => truck.status === 'ON_ROUTE').length;
 
+    // Live load across the fleet. Only bins whose device actually published a
+    // weight count towards it, so a fleet where nobody reports weight shows a
+    // dash rather than a confident 0 kg.
+    const weighed = bins.filter((bin) => bin.weight !== null);
+    const totalWeight = weighed.length
+      ? weighed.reduce((total, bin) => total + bin.weight, 0)
+      : null;
+    // Capacity is operator-entered per bin; only sum it when every weighed bin
+    // has one, otherwise the percentage would be measured against a part fleet.
+    const totalCapacity =
+      weighed.length && weighed.every((bin) => bin.capacityKg)
+        ? weighed.reduce((total, bin) => total + bin.capacityKg, 0)
+        : null;
+
     return {
       totalBins: bins.length,
       full,
@@ -223,6 +237,9 @@ export const EcoBinProvider = ({ children }) => {
       pending,
       trucksActive: trucksOnRoute,
       trucksTotal: trucks.length,
+      totalWeight,
+      totalCapacity,
+      weighedBins: weighed.length,
       openReports: reports.filter((report) => report.status !== 'RESOLVED').length,
       completion: collectedToday + pending > 0
         ? Math.round((collectedToday / (collectedToday + pending)) * 100)
