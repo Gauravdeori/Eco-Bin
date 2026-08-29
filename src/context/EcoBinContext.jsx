@@ -1052,6 +1052,19 @@ export const EcoBinProvider = ({ children }) => {
           accepted.push(command.id);
           if (!bin) return;
 
+          /**
+           * A bin already on its way is left alone.
+           *
+           * A workflow watching ThingSpeak reports a bin as full for as long as
+           * it *is* full, which is every reading until a truck empties it. Each
+           * of those is a new reading and so a new command id, and without this
+           * the same bin would be dispatched again on every poll — reassigning
+           * it, and pulling a second truck off whatever it was doing. The
+           * command is still marked handled, because it has been dealt with:
+           * the truck is already going.
+           */
+          if (bin.assignment) return;
+
           const result = assignTruckRef.current(bin.channelId, command.truckId ?? undefined, {
             source: 'n8n',
           });
