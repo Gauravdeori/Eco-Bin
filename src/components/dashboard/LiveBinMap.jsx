@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { MapContainer, Marker, Polyline, Popup, TileLayer, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import { MapPin, Filter, Navigation, AlertTriangle, Route, Loader2, X, Leaf } from 'lucide-react';
+import { MapPin, Filter, Navigation, AlertTriangle, Route, Loader2, X, Leaf, Truck } from 'lucide-react';
 import { useEcoBin } from '../../context/EcoBinContext';
 import { STATUS, STATUS_META, suspiciousCoords } from '../../lib/telemetry';
 import { planRoute, formatDistance, formatDuration } from '../../services/routing';
@@ -50,6 +50,20 @@ const markerIcon = (bin, selected, seq = null) => {
   });
 };
 
+/** One colour per truck, so two runs crossing the same street stay readable. */
+export const RUN_COLOURS = ['#0ea5e9', '#8b5cf6', '#f59e0b', '#ec4899', '#14b8a6', '#84cc16'];
+
+const truckIcon = (label, colour) =>
+  L.divIcon({
+    className: 'truck-marker',
+    html: `<div class="truck-pin" style="--truck:${colour}">
+             <span class="body">${escapeHtml(label)}</span>
+           </div>`,
+    iconSize: [34, 20],
+    iconAnchor: [17, 10],
+    popupAnchor: [0, -12],
+  });
+
 const depotIcon = () =>
   L.divIcon({
     className: 'depot-marker',
@@ -96,7 +110,18 @@ const SOURCE_LABEL = {
 };
 
 export const LiveBinMap = ({ height = 'h-[340px]', scrollZoom = false }) => {
-  const { bins, selectedBin, setSelectedChannelId, setPage, assignTruck, settings } = useEcoBin();
+  const {
+    bins,
+    selectedBin,
+    setSelectedChannelId,
+    setPage,
+    assignTruck,
+    settings,
+    fleetRuns,
+    planRuns,
+    planning,
+    depotPoint,
+  } = useEcoBin();
   const [filter, setFilter] = useState('ALL');
   const [scope, setScope] = useState('DUE');
   const [route, setRoute] = useState(null);
@@ -134,12 +159,8 @@ export const LiveBinMap = ({ height = 'h-[340px]', scrollZoom = false }) => {
     return [...(scope === 'ALL' ? positioned : due)].sort((a, b) => (b.fill ?? 0) - (a.fill ?? 0));
   }, [bins, scope]);
 
-  // Runs start and end at the depot; the map centre stands in until one is set.
-  const depot = useMemo(() => {
-    const { lat, lng } = settings.depot ?? {};
-    if (lat !== null && lat !== undefined && lng !== null && lng !== undefined) return [lat, lng];
-    return [settings.mapCenter.lat, settings.mapCenter.lng];
-  }, [settings.depot, settings.mapCenter]);
+  // The depot is defined once, in context, so the map and the planner agree.
+  const depot = depotPoint;
 
   /** channelId → its position in the planned run, for the pin badges. */
   const sequence = useMemo(() => {
@@ -242,6 +263,20 @@ export const LiveBinMap = ({ height = 'h-[340px]', scrollZoom = false }) => {
             </select>
           </div>
 
+          <Button
+            variant="primary"
+            onClick={() => planRuns({ scope })}
+            disabled={planning}
+            title="Split the bins across your trucks and route each one"
+          >
+            {planning ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Truck className="h-3.5 w-3.5" />
+            )}
+            Dispatch fleet
+          </Button>
+
           {queue.length >= 2 &&
             (route ? (
               <Button onClick={clearRoute} title="Hide the planned run">
@@ -340,7 +375,15 @@ export const LiveBinMap = ({ height = 'h-[340px]', scrollZoom = false }) => {
               attribution='&copy; OpenStreetMap contributors'
               maxZoom={19}
             />
-            <FitBounds points={route ? route.path : points} />
+            <FitBounds
+              points={
+                route
+                  ? route.path
+                  : fleetRuns.length > 0
+                    ? fleetRuns.flatMap((run) => run.path)
+                    : points
+              }
+            />
 
             {route && (
               <>
@@ -349,7 +392,41 @@ export const LiveBinMap = ({ height = 'h-[340px]', scrollZoom = false }) => {
                 <Polyline positions={route.path} color="#0ea5e9" weight={4} opacity={0.95} />
               </>
             )}
-            {route && (
+
+            {/* Live fleet: one coloured line per truck, and the truck on it. */}
+            {fleetRuns.map((run, index) => {
+              const colour = RUN_COLOURS[index % RUN_COLOURS.length];
+              return (
+                <React.Fragment key={run.truckId}>
+                  <Polyline positions={run.path} color="#0f172a" weight={7} opacity={0.2} />
+                  <Polyline positions={run.path} color={colour} weight={4} opacity={0.9} />
+                  {run.position && (
+                    <Marker position={run.position} icon={truckIcon(run.truckId, colour)}>
+                      <Popup>
+                        <div className="min-w-[180px] p-3">
+                          <p className="font-heading text-sm font-extrabold text-slate-900">
+                            {run.truckId}
+                          </p>
+                          <p className="mt-0.5 text-[11px] text-slate-500">
+                            {run.driver} · {run.stopsDone} of {run.stops.length} stops ·{' '}
+                            {Math.round(run.progress * 100)}%
+                          </p>
+                          <p className="mt-1 text-[11px] text-slate-600">
+                            {formatDistance(run.distanceM)} · {formatDuration(run.remainingS)} left
+                          </p>
+                          <p className="mt-1 text-[10px] leading-relaxed text-slate-400">
+                            {run.stopNames
+                              .map((name, i) => `${run.collected.includes(run.stops[i]) ? '✓' : `${i + 1}.`} ${name}`)
+                              .join('  ·  ')}
+                          </p>
+                        </div>
+                      </Popup>
+                    </Marker>
+                  )}
+                </React.Fragment>
+              );
+            })}
+            {(route || fleetRuns.length > 0) && (
               <Marker position={depot} icon={depotIcon()}>
                 <Popup>
                   <div className="p-3">

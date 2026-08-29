@@ -277,9 +277,9 @@ export const optimiseOrder = (cost, { roundTrip = true } = {}) => {
  * keeps them apart rather than mixing them into a single figure.
  */
 export const planRoute = async (stops, { apiKey, signal, depot = null } = {}) => {
-  if (stops.length < 2) throw new RoutingError('A route needs at least two stops.');
-
   const locations = depot ? [depot, ...stops] : stops;
+  // One stop is a real run when there is a depot to leave from and return to.
+  if (locations.length < 2) throw new RoutingError('A route needs at least two stops.');
   if (locations.length > MAX_STOPS) {
     throw new RoutingError(`Routes are limited to ${MAX_STOPS} stops.`);
   }

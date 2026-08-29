@@ -84,7 +84,7 @@ export const DEFAULT_SETTINGS = {
    * they appear — the rest of this app only ever shows numbers a device sent,
    * and a simulated bin is only allowed to break that because it says so.
    */
-  simulation: { enabled: true },
+  simulation: { enabled: true, speed: 20 },
 
   /**
    * Where a collection run starts and ends. Falls back to the map centre,

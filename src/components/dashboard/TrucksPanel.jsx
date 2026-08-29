@@ -2,7 +2,8 @@ import React from 'react';
 import { Truck, MapPin } from 'lucide-react';
 import { useEcoBin } from '../../context/EcoBinContext';
 import { STATUS, STATUS_META } from '../../lib/telemetry';
-import { Card, EmptyState, Button, cx } from '../ui/Primitives';
+import { formatDistance, formatDuration } from '../../services/routing';
+import { Card, EmptyState, Button, Meter, cx } from '../ui/Primitives';
 
 const TRUCK_STATUS = {
   ON_ROUTE: { label: 'On Route', className: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300' },
@@ -11,7 +12,9 @@ const TRUCK_STATUS = {
 };
 
 export const TrucksPanel = ({ limit }) => {
-  const { trucks, bins, assignments, setPage } = useEcoBin();
+  const { trucks, bins, assignments, setPage, fleetRuns, cancelRun } = useEcoBin();
+
+  const runFor = (truckId) => fleetRuns.find((run) => run.truckId === truckId) ?? null;
 
   const rows = limit ? trucks.slice(0, limit) : trucks;
 
@@ -63,6 +66,7 @@ export const TrucksPanel = ({ limit }) => {
           <ul className="space-y-2">
             {rows.map((truck) => {
               const target = targetFor(truck.id);
+              const run = runFor(truck.id);
               const style = TRUCK_STATUS[truck.status] ?? TRUCK_STATUS.IDLE;
               return (
                 <li
@@ -85,16 +89,46 @@ export const TrucksPanel = ({ limit }) => {
                   <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
                     Driver: {truck.driver}
                   </p>
-                  <p className="mt-0.5 truncate text-[11px] text-slate-500 dark:text-slate-400">
-                    {target ? (
-                      <>
+                  {run ? (
+                    <>
+                      <p className="mt-1 truncate text-[11px] text-slate-600 dark:text-slate-300">
                         <MapPin className="mr-1 inline h-3 w-3" />
-                        Heading to {target.id}
-                      </>
-                    ) : (
-                      'No stop assigned'
-                    )}
-                  </p>
+                        Stop {Math.min(run.stopsDone + 1, run.stops.length)} of {run.stops.length}
+                        {run.stopNames[Math.min(run.stopsDone, run.stops.length - 1)]
+                          ? ` · ${run.stopNames[Math.min(run.stopsDone, run.stops.length - 1)]}`
+                          : ''}
+                      </p>
+                      <Meter
+                        value={Math.round(run.progress * 100)}
+                        color="bg-emerald-500"
+                        className="mt-1.5"
+                      />
+                      <p className="mt-1 flex items-center justify-between text-[10px] text-slate-400">
+                        <span className="tabular">
+                          {formatDistance(run.distanceM)} · {run.loadKg} kg
+                        </span>
+                        <span className="tabular">{formatDuration(run.remainingS)} left</span>
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => cancelRun(truck.id)}
+                        className="mt-1.5 text-[10px] font-bold text-rose-600 hover:underline dark:text-rose-400"
+                      >
+                        Call off run
+                      </button>
+                    </>
+                  ) : (
+                    <p className="mt-0.5 truncate text-[11px] text-slate-500 dark:text-slate-400">
+                      {target ? (
+                        <>
+                          <MapPin className="mr-1 inline h-3 w-3" />
+                          Heading to {target.id}
+                        </>
+                      ) : (
+                        'No stop assigned'
+                      )}
+                    </p>
+                  )}
                 </li>
               );
             })}

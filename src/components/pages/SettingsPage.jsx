@@ -409,6 +409,26 @@ export const SettingsPage = () => {
             </div>
 
             <Field
+              label={`Simulated driving speed: ${settings.simulation?.speed ?? 20}x real time`}
+              hint="A real round takes most of an hour. Distances, ordering and fuel are real; only the playback is sped up."
+            >
+              <input
+                type="range"
+                min="1"
+                max="120"
+                step="1"
+                value={settings.simulation?.speed ?? 20}
+                onChange={(event) =>
+                  updateSettings((current) => ({
+                    ...current,
+                    simulation: { ...current.simulation, speed: Number(event.target.value) },
+                  }))
+                }
+                className="w-full text-emerald-600"
+              />
+            </Field>
+
+            <Field
               label="Truck fuel economy (km per litre)"
               hint={`Refuse trucks manage roughly 2.5–3. Diesel releases ${DIESEL_KG_CO2_PER_LITRE} kg CO₂ per litre burnt.`}
             >

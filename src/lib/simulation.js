@@ -40,9 +40,17 @@ const rateOf = (site) => 95 / site.cycleHours;
  * pattern with no drift: the sawtooth stays continuous across midnight, and
  * the phases stay spread instead of slowly sliding into step with each other
  * and leaving the whole fleet empty at the same moment.
+ *
+ * `collectedAt` re-anchors the cycle. When a simulated truck reaches a bin it
+ * stamps the time, and from that moment the bin fills from empty again — which
+ * puts a genuine cliff in the reading history, so the app's own collection
+ * detection notices it exactly as it would on real hardware. Nothing special
+ * cases a simulated pickup downstream.
  */
-const fillAt = (site, at) => {
-  const hours = (at - ANCHOR) / HOUR + site.phaseHours;
+const fillAt = (site, at, collectedAt = null) => {
+  const anchor = collectedAt !== null && at >= collectedAt ? collectedAt : ANCHOR;
+  const phase = anchor === ANCHOR ? site.phaseHours : 0;
+  const hours = (at - anchor) / HOUR + phase;
   const position = ((hours % site.cycleHours) + site.cycleHours) % site.cycleHours;
   return Math.max(2, Math.min(99, Math.round(position * rateOf(site))));
 };
@@ -51,13 +59,13 @@ const fillAt = (site, at) => {
  * One simulated bin, in the exact shape `buildBin` returns so that every
  * consumer — overlays, ranking, dispatch, charts — treats it like any other.
  */
-const buildSimBin = (site, index, { centre, thresholds, now, historyHours = 24, stepMinutes = 15 }) => {
+const buildSimBin = (site, index, { centre, thresholds, now, collectedAt = null, historyHours = 24, stepMinutes = 15 }) => {
   const readings = [];
   const steps = Math.floor((historyHours * 60) / stepMinutes);
 
   for (let i = steps; i >= 0; i -= 1) {
     const at = new Date(now - i * stepMinutes * 60 * 1000);
-    const fill = fillAt(site, at.getTime());
+    const fill = fillAt(site, at.getTime(), collectedAt);
     readings.push({
       at,
       entryId: steps - i + 1,
@@ -108,8 +116,21 @@ const buildSimBin = (site, index, { centre, thresholds, now, historyHours = 24, 
 
 export const SIMULATED_COUNT = SITES.length;
 
-/** The simulated fleet as of `now`. */
-export const simulatedBins = ({ centre, thresholds, now = Date.now() }) =>
-  SITES.map((site, index) => buildSimBin(site, index, { centre, thresholds, now }));
+/**
+ * The simulated fleet as of `now`.
+ *
+ * `collections` maps a channel id to when a truck last emptied it, so a bin a
+ * simulated truck has reached restarts from empty instead of carrying on up
+ * its own curve.
+ */
+export const simulatedBins = ({ centre, thresholds, now = Date.now(), collections = {} }) =>
+  SITES.map((site, index) =>
+    buildSimBin(site, index, {
+      centre,
+      thresholds,
+      now,
+      collectedAt: collections[`sim-${index + 1}`] ?? null,
+    }),
+  );
 
 export { STATUS };
