@@ -6,6 +6,7 @@ import { CollectionProgress, CollectionActivity } from '../dashboard/CollectionP
 import { BinDetailsPanel } from '../dashboard/BinDetailsPanel';
 import { TrucksPanel } from '../dashboard/TrucksPanel';
 import { ReadingsChart } from '../dashboard/ReadingsChart';
+import { PriorityList } from '../dashboard/PriorityList';
 import { AnalyticsOverview } from '../dashboard/AnalyticsOverview';
 
 export const DashboardPage = () => (
@@ -28,7 +29,14 @@ export const DashboardPage = () => (
       </div>
     </div>
 
-    <ReadingsChart />
+    <div className="grid gap-4 xl:grid-cols-12">
+      <div className="xl:col-span-4">
+        <PriorityList />
+      </div>
+      <div className="xl:col-span-8">
+        <ReadingsChart />
+      </div>
+    </div>
 
     <div className="grid gap-4 xl:grid-cols-12">
       <div className="xl:col-span-5">

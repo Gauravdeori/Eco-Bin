@@ -344,3 +344,155 @@ export const formatNumber = (value, unit = '', digits = 1) =>
   value === null || value === undefined
     ? '—'
     : `${Number(value).toFixed(digits).replace(/\.0$/, '')}${unit}`;
+
+/* -- priority ranking ----------------------------------------------------- */
+
+export const PRIORITY = {
+  CRITICAL: 'CRITICAL',
+  HIGH: 'HIGH',
+  MEDIUM: 'MEDIUM',
+  LOW: 'LOW',
+};
+
+export const PRIORITY_META = {
+  [PRIORITY.CRITICAL]: { label: 'Critical', hex: '#f43f5e' },
+  [PRIORITY.HIGH]: { label: 'High', hex: '#f97316' },
+  [PRIORITY.MEDIUM]: { label: 'Medium', hex: '#f59e0b' },
+  [PRIORITY.LOW]: { label: 'Low', hex: '#10b981' },
+};
+
+const HOUR = 60 * 60 * 1000;
+const DAY = 24 * HOUR;
+
+/**
+ * How fast the bin is filling, in percentage points per hour.
+ *
+ * Only readings taken after the last collection count: an emptying event is a
+ * cliff in the series, and averaging across it would report a bin that is
+ * filling steadily as one that is losing waste. Returns null when the device
+ * has not published enough recent points to extrapolate from honestly.
+ */
+export const fillRatePerHour = (bin, { windowHours = 6, now = Date.now() } = {}) => {
+  const collectedAt = bin.lastCollected ? bin.lastCollected.getTime() : 0;
+  const since = Math.max(now - windowHours * HOUR, collectedAt);
+
+  const points = bin.readings.filter((r) => r.fill !== null && r.at.getTime() > since);
+  if (points.length < 2) return null;
+
+  const first = points[0];
+  const last = points[points.length - 1];
+  const hours = (last.at.getTime() - first.at.getTime()) / HOUR;
+  // Two readings a minute apart say nothing about the next six hours.
+  if (hours < 0.25) return null;
+
+  return (last.fill - first.fill) / hours;
+};
+
+/**
+ * Scores one bin on how urgently it needs a human, and says why.
+ *
+ * The score is additive so the reasons stay legible: every term that fires
+ * appends a chip the operator can read back, and no single signal can silently
+ * dominate. Fill level is the backbone; everything else adjusts around it.
+ */
+export const binPriority = (bin, { thresholds, now = Date.now() }) => {
+  const reasons = [];
+  let score = 0;
+
+  if (bin.fill === null) {
+    // No number to rank on. Say so rather than scoring it as an empty bin.
+    reasons.push('No fill reading');
+  } else if (bin.fill >= thresholds.full) {
+    score += 60 + ((bin.fill - thresholds.full) / Math.max(1, 100 - thresholds.full)) * 20;
+    reasons.push(`${bin.fill}% full`);
+  } else if (bin.fill >= thresholds.filling) {
+    score +=
+      25 +
+      ((bin.fill - thresholds.filling) / Math.max(1, thresholds.full - thresholds.filling)) * 30;
+    reasons.push(`${bin.fill}% full`);
+  } else {
+    score += (bin.fill / Math.max(1, thresholds.filling)) * 25;
+  }
+
+  // A bin climbing fast outranks a fuller one that has stopped moving: by the
+  // time the truck arrives, the fast one is the overflow.
+  const fillRate = fillRatePerHour(bin, { now });
+  const hoursToFull =
+    fillRate !== null && fillRate > 0.5 && bin.fill !== null && bin.fill < thresholds.full
+      ? (thresholds.full - bin.fill) / fillRate
+      : null;
+
+  if (hoursToFull !== null && hoursToFull <= 6) {
+    score += 20 * (1 - hoursToFull / 6);
+    reasons.push(hoursToFull < 1 ? 'Full within the hour' : `~${Math.round(hoursToFull)}h to full`);
+  }
+
+  // Someone stood in front of it and complained. That beats a clean sensor.
+  if (bin.openReport) {
+    score += 18;
+    reasons.push(`Reported: ${bin.openReport.issueType}`);
+  }
+
+  // The load cell catches overflows the ultrasonic sensor misses — light bulky
+  // waste reads as full, dense waste reads as empty while the bin is at weight.
+  if (bin.capacityKg && bin.weight !== null) {
+    const ratio = bin.weight / bin.capacityKg;
+    if (ratio >= 1) {
+      score += 15;
+      reasons.push('Over capacity by weight');
+    } else if (ratio >= 0.9) {
+      score += 8;
+      reasons.push(`${Math.round(ratio * 100)}% of capacity`);
+    }
+  }
+
+  // A silent bin is an unknown, and an unknown cannot be planned around.
+  if (bin.isOffline) {
+    score += 35;
+    reasons.push(bin.lastSeen ? `Silent ${formatRelative(bin.lastSeen, now)}` : 'Never reported');
+  }
+
+  if (bin.battery !== null && bin.battery < 20) {
+    score += 10;
+    reasons.push(`Battery ${bin.battery}%`);
+  }
+
+  // A slow bin still needs a visit eventually; three days is the nudge.
+  const sinceCollected = bin.lastCollected ? now - bin.lastCollected.getTime() : null;
+  if (sinceCollected !== null && sinceCollected > 3 * DAY) {
+    score += Math.min(10, (sinceCollected / DAY - 3) * 2);
+    reasons.push(`Uncollected ${Math.floor(sinceCollected / DAY)}d`);
+  }
+
+  // A truck is already on its way: keep the bin visible, but stop it sitting at
+  // the top of a list of things nobody has dealt with yet.
+  if (bin.assignment) {
+    score *= 0.25;
+    reasons.unshift(`${bin.assignment.truckId} en route`);
+  }
+
+  // Parked by the operator, so it is not a collection decision any more.
+  if (bin.status === STATUS.MAINTENANCE) {
+    score = Math.min(score, 15);
+    reasons.unshift('Under maintenance');
+  }
+
+  score = Math.round(Math.max(0, Math.min(100, score)));
+
+  const level =
+    score >= 70
+      ? PRIORITY.CRITICAL
+      : score >= 45
+        ? PRIORITY.HIGH
+        : score >= 22
+          ? PRIORITY.MEDIUM
+          : PRIORITY.LOW;
+
+  return { score, level, reasons, fillRate, hoursToFull };
+};
+
+/** Every bin, most urgent first. Ties break on the fuller bin. */
+export const priorityRanking = (bins, options) =>
+  bins
+    .map((bin) => ({ bin, ...binPriority(bin, options) }))
+    .sort((a, b) => b.score - a.score || (b.bin.fill ?? -1) - (a.bin.fill ?? -1));
