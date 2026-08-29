@@ -1,7 +1,7 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import { ListOrdered, Inbox, Zap } from 'lucide-react';
 import { useEcoBin } from '../../context/EcoBinContext';
-import { PRIORITY_META, priorityRanking } from '../../lib/telemetry';
+import { PRIORITY_META } from '../../lib/telemetry';
 import { Card, CardHeader, EmptyState, cx } from '../ui/Primitives';
 
 /** One "why" chip. The ranking is only useful if the operator can audit it. */
@@ -77,13 +77,16 @@ const Row = ({ rank, entry, selected, onSelect }) => {
  * taken on faith.
  */
 export const PriorityList = ({ limit = 6 }) => {
-  const { bins, settings, trucks, selectedChannelId, setSelectedChannelId, setPage } = useEcoBin();
+  const {
+    bins,
+    settings,
+    trucks,
+    ranking: ranked,
+    selectedChannelId,
+    setSelectedChannelId,
+    setPage,
+  } = useEcoBin();
   const auto = settings.autoDispatch;
-
-  const ranked = useMemo(
-    () => priorityRanking(bins, { thresholds: settings.thresholds }),
-    [bins, settings.thresholds],
-  );
 
   const urgent = ranked.filter((entry) => entry.score >= 45).length;
 

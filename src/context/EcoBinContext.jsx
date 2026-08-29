@@ -16,7 +16,6 @@ import {
   STATUS,
   applyOverlays,
   buildBin,
-  binPriority,
   collectionTrend,
   priorityLevel,
   priorityRanking,
@@ -32,6 +31,9 @@ const reviveAlerts = (alerts) =>
   alerts.map((alert) => ({ ...alert, at: new Date(alert.at) }));
 
 const ALERT_LIMIT = 60;
+
+/** How long to leave a truck alone after its route failed to plan. */
+const RETRY_AFTER_MS = 60 * 1000;
 
 export const EcoBinProvider = ({ children }) => {
   /* ── configuration ──────────────────────────────────────────────────────── */
@@ -159,6 +161,29 @@ export const EcoBinProvider = ({ children }) => {
     () => bins.find((bin) => bin.channelId === selectedChannelId) ?? bins[0] ?? null,
     [bins, selectedChannelId],
   );
+
+  /**
+   * The priority ranking, worked out once per telemetry update.
+   *
+   * Scoring a bin walks its whole reading history to find its fill rate, and
+   * five separate places wanted the answer: the priority list, auto-dispatch,
+   * the run planner, the map's route banding and the live run colours. Each
+   * recomputed it, and the last of those runs on a one-second clock while a
+   * truck is driving, so the same scan was being redone for every stop of
+   * every run every second. Doing it here ties the work to the data changing
+   * instead of to the clock.
+   */
+  const ranking = useMemo(
+    () => priorityRanking(bins, { thresholds: settings.thresholds }),
+    [bins, settings.thresholds],
+  );
+
+  /** The same scores, addressable by channel. */
+  const priorityByChannel = useMemo(() => {
+    const map = new Map();
+    ranking.forEach((entry) => map.set(entry.bin.channelId, entry));
+    return map;
+  }, [ranking]);
 
   /* ── alerts derived from real telemetry transitions ─────────────────────── */
   const previousRef = useRef(new Map());
@@ -335,7 +360,7 @@ export const EcoBinProvider = ({ children }) => {
         scope === 'ALL'
           ? positioned
           : positioned.filter(
-              (bin) => binPriority(bin, { thresholds: settings.thresholds }).needsCollection,
+              (bin) => priorityByChannel.get(bin.channelId)?.needsCollection,
             );
 
       // A truck already driving a run is left alone rather than re-planned out
@@ -414,7 +439,7 @@ export const EcoBinProvider = ({ children }) => {
       trucks,
       runs,
       depotPoint,
-      settings.thresholds,
+      priorityByChannel,
       settings.orsKey,
       setRuns,
       setTrucks,
@@ -467,7 +492,6 @@ export const EcoBinProvider = ({ children }) => {
    * burning the request quota that the retries need.
    */
   const routeFailedAt = useRef(new Map());
-  const RETRY_AFTER_MS = 60 * 1000;
 
   useEffect(() => {
     const pending = new Map();
@@ -590,18 +614,15 @@ export const EcoBinProvider = ({ children }) => {
        * operator needs to see in red. The share of full stops is what closes
        * that gap, and it cannot rescue a run that is mostly empty.
        */
-      const stillToDo = run.stops
+      const remaining = run.stops
         .filter((channelId) => !run.collected.includes(channelId))
-        .map((channelId) => bins.find((bin) => bin.channelId === channelId))
+        .map((channelId) => priorityByChannel.get(channelId))
         .filter(Boolean);
 
-      const remaining = stillToDo.map((bin) =>
-        binPriority(bin, { thresholds: settings.thresholds }),
-      );
-
       const fullShare = remaining.length
-        ? stillToDo.filter((bin) => bin.fill !== null && bin.fill >= settings.thresholds.full)
-            .length / remaining.length
+        ? remaining.filter(
+            (entry) => entry.bin.fill !== null && entry.bin.fill >= settings.thresholds.full,
+          ).length / remaining.length
         : 0;
 
       const urgency = remaining.length
@@ -636,7 +657,7 @@ export const EcoBinProvider = ({ children }) => {
         finished: progress >= 1,
       };
     });
-  }, [runs, clock, bins, settings.simulation?.speed, settings.thresholds]);
+  }, [runs, clock, priorityByChannel, settings.simulation?.speed, settings.thresholds]);
 
   /** Arrivals, and runs that have made it back to the depot. */
   useEffect(() => {
@@ -749,7 +770,7 @@ export const EcoBinProvider = ({ children }) => {
     const idle = trucks.filter((truck) => truck.status === 'IDLE');
     if (idle.length === 0) return;
 
-    const candidates = priorityRanking(bins, { thresholds: settings.thresholds, now }).filter(
+    const candidates = ranking.filter(
       (entry) =>
         entry.score >= autoDispatch.minScore &&
         // Urgent AND actually a collection job — see binPriority.
@@ -804,11 +825,10 @@ export const EcoBinProvider = ({ children }) => {
       });
     });
   }, [
-    bins,
+    ranking,
     trucks,
     dispatchHolds,
     autoDispatch,
-    settings.thresholds,
     setAssignments,
     setTrucks,
     pushAlert,
@@ -818,9 +838,14 @@ export const EcoBinProvider = ({ children }) => {
   const assignTruck = useCallback(
     (channelId, truckId) => {
       const bin = bins.find((item) => item.channelId === channelId);
+      // Named truck first; otherwise the best-fitting free one, by the same
+      // rule auto-dispatch uses. It used to take whichever idle truck happened
+      // to be first in the list, which sent the biggest vehicle to the lightest
+      // bin as often as not.
+      const idle = trucks.filter((item) => item.status === 'IDLE');
       const truck =
         trucks.find((item) => item.id === truckId) ??
-        trucks.find((item) => item.status === 'IDLE') ??
+        (idle.length ? pickTruck(bin, idle) : null) ??
         trucks[0];
       if (!bin || !truck) return { ok: false, reason: 'no-truck' };
 
@@ -973,6 +998,8 @@ export const EcoBinProvider = ({ children }) => {
     maintenance,
     dispatchHolds,
     runs,
+    ranking,
+    priorityByChannel,
     fleetRuns,
     planRuns,
     cancelRun,

@@ -247,7 +247,7 @@ export const BinDetailsPanel = () => {
             title={trucks.length === 0 ? 'Add a truck on the Trucks page first' : undefined}
             className="flex-1 rounded-xl bg-brand-500 px-4 py-3 text-sm font-bold text-white transition-colors hover:bg-brand-400 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
           >
-            {trucks.length === 0 ? 'Add a truck to dispatch' : 'Assign Nearest Truck'}
+            {trucks.length === 0 ? 'Add a truck to dispatch' : 'Dispatch a Truck'}
           </button>
         )}
         <button

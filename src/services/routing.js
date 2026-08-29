@@ -220,8 +220,11 @@ export const costMatrix = async (locations, { apiKey, signal } = {}) => {
       method: 'POST',
       signal,
       headers: { Authorization: apiKey, 'Content-Type': 'application/json' },
+      // The matrix endpoint calls this `locations`, unlike directions, which
+      // calls the same thing `coordinates`. Sending the wrong one is a 400 that
+      // looks exactly like every other reason to fall back to OSRM.
       body: JSON.stringify({
-        coordinates: locations.map(([lat, lng]) => [lng, lat]),
+        locations: locations.map(([lat, lng]) => [lng, lat]),
         metrics: ['distance', 'duration'],
         units: 'm',
       }),

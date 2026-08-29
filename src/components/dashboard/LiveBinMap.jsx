@@ -69,10 +69,10 @@ const markerIcon = (bin, selected, seq = null) => {
  */
 const ROUTE_ORDER = [PRIORITY.CRITICAL, PRIORITY.HIGH, PRIORITY.MEDIUM, PRIORITY.LOW];
 
-const truckIcon = (label, colour, heading) =>
+const truckIcon = (label, colour) =>
   L.divIcon({
     className: 'truck-marker',
-    html: `<div class="truck-pin" style="--truck:${colour};--heading:${heading}deg">
+    html: `<div class="truck-pin" style="--truck:${colour}">
              <span class="ping"></span>
              <span class="disc">
                <span class="arrow">
@@ -95,6 +95,29 @@ const depotIcon = () =>
     popupAnchor: [0, -14],
   });
 
+/**
+ * Marker icons, reused while nothing about them has changed.
+ *
+ * Handing Leaflet a new divIcon makes it throw the marker's element away and
+ * build another. That is fine once, but the map re-renders every second while a
+ * truck is driving, and rebuilding every pin at 1Hz restarts each one's pulse
+ * animation and costs a DOM churn nobody asked for. Keying on what the icon
+ * actually draws means the same object comes back until the pin really differs.
+ */
+const useIconCache = () => {
+  const cache = useRef(new Map());
+
+  return (key, build) => {
+    const store = cache.current;
+    if (!store.has(key)) {
+      // Fill level moves, so keys accumulate. Nothing here is worth leaking.
+      if (store.size > 240) store.clear();
+      store.set(key, build());
+    }
+    return store.get(key);
+  };
+};
+
 /** Keeps every visible bin inside the viewport as coordinates arrive. */
 const FitBounds = ({ points }) => {
   const map = useMap();
@@ -115,6 +138,31 @@ const FitBounds = ({ points }) => {
   }, [key, map]);
 
   return null;
+};
+
+/**
+ * A truck on the map.
+ *
+ * The icon deliberately never changes, so Leaflet keeps the same element and
+ * `setLatLng` alone moves it — which is what lets the CSS transform transition
+ * animate the truck between ticks instead of it jumping. Heading is written
+ * straight onto the live element as a custom property for the same reason:
+ * rebuilding the icon to turn the arrow would defeat the gliding.
+ */
+const TruckMarker = ({ run, colour, children }) => {
+  const ref = useRef(null);
+  const icon = useMemo(() => truckIcon(run.truckId, colour), [run.truckId, colour]);
+
+  useEffect(() => {
+    const pin = ref.current?.getElement()?.querySelector('.truck-pin');
+    if (pin) pin.style.setProperty('--heading', `${Math.round(run.heading)}deg`);
+  }, [run.heading, icon]);
+
+  return (
+    <Marker ref={ref} position={run.position} icon={icon}>
+      {children}
+    </Marker>
+  );
 };
 
 /**
@@ -229,6 +277,7 @@ export const LiveBinMap = ({ height = 'h-[340px]', scrollZoom = false }) => {
     depotPoint,
     cancelRun,
   } = useEcoBin();
+  const iconFor = useIconCache();
   const [filter, setFilter] = useState('ALL');
   const [scope, setScope] = useState('DUE');
   const [route, setRoute] = useState(null);
@@ -574,7 +623,7 @@ export const LiveBinMap = ({ height = 'h-[340px]', scrollZoom = false }) => {
                   <Polyline positions={run.path} color="#0f172a" weight={7} opacity={0.2} />
                   <Polyline positions={run.path} color={colour} weight={4} opacity={0.9} />
                   {run.position && (
-                    <Marker position={run.position} icon={truckIcon(run.truckId, colour, run.heading)}>
+                    <TruckMarker run={run} colour={colour}>
                       <Popup>
                         <div className="min-w-[180px] p-3">
                           <p className="font-heading text-sm font-extrabold text-slate-900">
@@ -594,13 +643,13 @@ export const LiveBinMap = ({ height = 'h-[340px]', scrollZoom = false }) => {
                           </p>
                         </div>
                       </Popup>
-                    </Marker>
+                    </TruckMarker>
                   )}
                 </React.Fragment>
               );
             })}
             {(route || fleetRuns.length > 0) && (
-              <Marker position={depot} icon={depotIcon()}>
+              <Marker position={depot} icon={iconFor('depot', depotIcon)}>
                 <Popup>
                   <div className="p-3">
                     <p className="font-heading text-sm font-extrabold text-slate-900">Depot</p>
@@ -619,11 +668,14 @@ export const LiveBinMap = ({ height = 'h-[340px]', scrollZoom = false }) => {
               <Marker
                 key={bin.channelId}
                 position={[bin.lat, bin.lng]}
-                icon={markerIcon(
-                  bin,
-                  selectedBin?.channelId === bin.channelId,
-                  sequence.get(bin.channelId) ?? null,
-                )}
+                icon={(() => {
+                  const selected = selectedBin?.channelId === bin.channelId;
+                  const seq = sequence.get(bin.channelId) ?? null;
+                  return iconFor(
+                    `${bin.channelId}|${bin.status}|${bin.fill}|${bin.id}|${selected}|${seq}`,
+                    () => markerIcon(bin, selected, seq),
+                  );
+                })()}
                 eventHandlers={{ click: () => setSelectedChannelId(bin.channelId) }}
               >
                 <Popup>
@@ -669,7 +721,7 @@ export const LiveBinMap = ({ height = 'h-[340px]', scrollZoom = false }) => {
                         onClick={() => assignTruck(bin.channelId)}
                         className="mt-2.5 w-full rounded-lg bg-emerald-600 px-3 py-1.5 text-[11px] font-bold text-white hover:bg-emerald-500"
                       >
-                        Assign nearest truck
+                        Dispatch a truck
                       </button>
                     )}
                   </div>
