@@ -224,3 +224,15 @@ export const planFleetRuns = async (groups, { apiKey, signal, depot, startedAt }
 
   return runs;
 };
+
+/**
+ * Screen bearing from one point to the next, in degrees clockwise from north.
+ * Used to point a moving marker along its route rather than leaving it fixed.
+ */
+export const headingDeg = (from, to) => {
+  if (!from || !to) return 0;
+  const dLat = to[0] - from[0];
+  const dLng = to[1] - from[1];
+  if (dLat === 0 && dLng === 0) return 0;
+  return (Math.atan2(dLng, dLat) * 180) / Math.PI;
+};

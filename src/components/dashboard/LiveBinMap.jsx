@@ -50,18 +50,27 @@ const markerIcon = (bin, selected, seq = null) => {
   });
 };
 
-/** One colour per truck, so two runs crossing the same street stay readable. */
-export const RUN_COLOURS = ['#0ea5e9', '#8b5cf6', '#f59e0b', '#ec4899', '#14b8a6', '#84cc16'];
+/**
+ * One colour per truck, so two runs crossing the same street stay apart.
+ * The first is the blue a live-tracking map is expected to be.
+ */
+export const RUN_COLOURS = ['#276ef1', '#8b5cf6', '#f59e0b', '#ec4899', '#14b8a6', '#84cc16'];
 
-const truckIcon = (label, colour) =>
+const truckIcon = (label, colour, heading) =>
   L.divIcon({
     className: 'truck-marker',
-    html: `<div class="truck-pin" style="--truck:${colour}">
-             <span class="body">${escapeHtml(label)}</span>
+    html: `<div class="truck-pin" style="--truck:${colour};--heading:${heading}deg">
+             <span class="ping"></span>
+             <span class="disc">
+               <span class="arrow">
+                 <svg viewBox="0 0 10 10"><path d="M5 0 L9.5 10 L5 7.6 L0.5 10 Z"/></svg>
+               </span>
+             </span>
+             <span class="plate">${escapeHtml(label)}</span>
            </div>`,
-    iconSize: [34, 20],
-    iconAnchor: [17, 10],
-    popupAnchor: [0, -12],
+    iconSize: [26, 26],
+    iconAnchor: [13, 13],
+    popupAnchor: [0, -15],
   });
 
 const depotIcon = () =>
@@ -95,6 +104,79 @@ const FitBounds = ({ points }) => {
   return null;
 };
 
+/**
+ * Live tracking for one truck, in the shape a rider-hailing app uses: who is
+ * driving, where they are going, and how long until they get there. An
+ * operator who has just pressed dispatch wants those three facts and no others.
+ */
+const TrackingCard = ({ run, colour, onCancel, onFocusBin }) => {
+  const nextIndex = Math.min(run.stopsDone, run.stops.length - 1);
+  const arrived = run.stopsDone >= run.stops.length;
+
+  return (
+    <div className="pointer-events-auto w-[268px] rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-xl backdrop-blur dark:border-slate-700 dark:bg-slate-900/95">
+      <div className="flex items-center gap-2.5">
+        <span
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-extrabold text-white"
+          style={{ background: colour }}
+        >
+          {run.driver?.trim()?.[0]?.toUpperCase() ?? 'T'}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-xs font-bold text-slate-900 dark:text-white">
+            {run.driver || 'Driver'}
+          </p>
+          <p className="truncate text-[11px] text-slate-500 dark:text-slate-400">
+            {run.truckId} · {run.loadKg} kg load
+          </p>
+        </div>
+        <div className="shrink-0 text-right">
+          <p className="font-heading text-base font-extrabold tabular text-slate-900 dark:text-white">
+            {/* Under a minute reads better as a word than as "0 min". */}
+            {arrived ? '—' : run.remainingS < 60 ? 'Now' : formatDuration(run.remainingS)}
+          </p>
+          <p className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">
+            {arrived ? 'returning' : 'away'}
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+        <span
+          className="block h-full rounded-full transition-[width] duration-1000 ease-linear"
+          style={{ width: `${Math.round(run.progress * 100)}%`, background: colour }}
+        />
+      </div>
+
+      <button
+        type="button"
+        onClick={() => onFocusBin(run.stops[nextIndex])}
+        className="mt-2 flex w-full items-start gap-1.5 text-left"
+      >
+        <Navigation className="mt-px h-3 w-3 shrink-0" style={{ color: colour }} />
+        <span className="min-w-0 flex-1 text-[11px] leading-snug text-slate-600 dark:text-slate-300">
+          {arrived ? (
+            'All stops collected — heading back to the depot'
+          ) : (
+            <>
+              Next stop <b className="text-slate-900 dark:text-white">{run.stopNames[nextIndex]}</b>
+              {run.stops.length > 1 ? ` · ${run.stopsDone} of ${run.stops.length} done` : ''}
+            </>
+          )}
+        </span>
+      </button>
+
+      <button
+        type="button"
+        onClick={() => onCancel(run.truckId)}
+        className="mt-2 w-full rounded-lg bg-slate-100 py-1.5 text-[11px] font-bold text-slate-600 transition-colors hover:bg-rose-50 hover:text-rose-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-rose-500/10 dark:hover:text-rose-400"
+      >
+        Call off {run.truckId}
+      </button>
+    </div>
+  );
+};
+
 /** One figure in the route summary bar. */
 const Metric = ({ label, value }) => (
   <span className="flex flex-col">
@@ -121,6 +203,7 @@ export const LiveBinMap = ({ height = 'h-[340px]', scrollZoom = false }) => {
     planRuns,
     planning,
     depotPoint,
+    cancelRun,
   } = useEcoBin();
   const [filter, setFilter] = useState('ALL');
   const [scope, setScope] = useState('DUE');
@@ -363,6 +446,21 @@ export const LiveBinMap = ({ height = 'h-[340px]', scrollZoom = false }) => {
       )}
 
       <div className={cx('relative mx-4 overflow-hidden rounded-xl', height)}>
+        {/* Live tracking, floated over the map like a ride-hailing app. */}
+        {fleetRuns.length > 0 && (
+          <div className="pointer-events-none absolute left-3 top-3 z-[1000] flex max-h-[calc(100%-24px)] flex-col gap-2 overflow-y-auto">
+            {fleetRuns.map((run, index) => (
+              <TrackingCard
+                key={run.truckId}
+                run={run}
+                colour={RUN_COLOURS[index % RUN_COLOURS.length]}
+                onCancel={cancelRun}
+                onFocusBin={setSelectedChannelId}
+              />
+            ))}
+          </div>
+        )}
+
         {points.length > 0 ? (
           <MapContainer
             center={points[0]}
@@ -401,7 +499,7 @@ export const LiveBinMap = ({ height = 'h-[340px]', scrollZoom = false }) => {
                   <Polyline positions={run.path} color="#0f172a" weight={7} opacity={0.2} />
                   <Polyline positions={run.path} color={colour} weight={4} opacity={0.9} />
                   {run.position && (
-                    <Marker position={run.position} icon={truckIcon(run.truckId, colour)}>
+                    <Marker position={run.position} icon={truckIcon(run.truckId, colour, run.heading)}>
                       <Popup>
                         <div className="min-w-[180px] p-3">
                           <p className="font-heading text-sm font-extrabold text-slate-900">

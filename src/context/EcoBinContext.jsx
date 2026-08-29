@@ -11,7 +11,7 @@ import { loadSettings, saveSettings, DEFAULT_SETTINGS } from '../config/settings
 import { useThingSpeak } from '../hooks/useThingSpeak';
 import { useLocalState } from '../hooks/useLocalState';
 import { simulatedBins } from '../lib/simulation';
-import { planFleetRuns, positionAlong, sweepPartition } from '../services/fleet';
+import { headingDeg, planFleetRuns, positionAlong, sweepPartition } from '../services/fleet';
 import {
   STATUS,
   applyOverlays,
@@ -447,6 +447,100 @@ export const EcoBinProvider = ({ children }) => {
     [runs, setRuns, setTrucks, setAssignments],
   );
 
+  /**
+   * Any truck holding assignments but not yet driving gets a run planned.
+   *
+   * This is the one place a run is created, so every route into dispatch ends
+   * up in the same state: pressing "assign" on a bin, auto-dispatch picking one
+   * unprompted, and planning the whole fleet all just write an assignment, and
+   * the truck starts moving from here. Without it, a manually assigned truck
+   * sat still while a fleet-dispatched one drove.
+   */
+  const routing = useRef(new Set());
+  /**
+   * When a truck's route last failed to plan.
+   *
+   * Bins refresh on every poll, which re-runs this effect. Without a cooldown a
+   * route that cannot be planned at all — a rejected API key, say — would be
+   * retried every few seconds for as long as the assignment stands, quietly
+   * burning the request quota that the retries need.
+   */
+  const routeFailedAt = useRef(new Map());
+  const RETRY_AFTER_MS = 60 * 1000;
+
+  useEffect(() => {
+    const pending = new Map();
+    Object.entries(assignments).forEach(([channelId, assignment]) => {
+      const truckId = assignment?.truckId;
+      if (!truckId || runs[truckId] || routing.current.has(truckId)) return;
+      const failedAt = routeFailedAt.current.get(truckId);
+      if (failedAt && Date.now() - failedAt < RETRY_AFTER_MS) return;
+      const bin = bins.find((item) => item.channelId === channelId);
+      if (!bin || bin.lat === null || bin.lng === null) return;
+      if (!pending.has(truckId)) pending.set(truckId, []);
+      pending.get(truckId).push(bin);
+    });
+
+    if (pending.size === 0) return;
+
+    let cancelled = false;
+    const truckIds = [...pending.keys()];
+    truckIds.forEach((id) => routing.current.add(id));
+
+    (async () => {
+      try {
+        const groups = truckIds
+          .map((truckId) => {
+            const truck = trucks.find((item) => item.id === truckId);
+            if (!truck) return null;
+            const stops = pending.get(truckId).map((bin) => ({
+              id: bin.channelId,
+              name: bin.id,
+              point: [bin.lat, bin.lng],
+              loadKg: bin.weight ?? 0,
+            }));
+            return { truck, stops, loadKg: stops.reduce((sum, stop) => sum + stop.loadKg, 0) };
+          })
+          .filter(Boolean);
+
+        if (groups.length === 0) return;
+
+        const planned = await planFleetRuns(groups, {
+          apiKey: settings.orsKey,
+          depot: depotPoint,
+          startedAt: Date.now(),
+        });
+        if (cancelled) return;
+
+        setRuns((current) => {
+          const next = { ...current };
+          planned.forEach((run) => {
+            if (!next[run.truckId]) next[run.truckId] = run;
+          });
+          return next;
+        });
+        setTrucks((fleet) =>
+          fleet.map((truck) =>
+            planned.some((run) => run.truckId === truck.id)
+              ? { ...truck, status: 'ON_ROUTE' }
+              : truck,
+          ),
+        );
+      } catch {
+        // A route that cannot be fetched leaves the assignment standing. The
+        // bin is still assigned and the operator still sees it; only the
+        // on-map tracking is missing, which is better than dropping the job.
+        truckIds.forEach((id) => routeFailedAt.current.set(id, Date.now()));
+      } finally {
+        truckIds.forEach((id) => routing.current.delete(id));
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [assignments, runs, bins, trucks, depotPoint, settings.orsKey, setRuns, setTrucks]);
+
   /* -- driving the runs ---------------------------------------------------- */
 
   /** Ticks only while something is actually moving. */
@@ -471,11 +565,24 @@ export const EcoBinProvider = ({ children }) => {
     return Object.values(runs).map((run) => {
       const elapsedS = ((clock - run.startedAt) / 1000) * speed;
       const progress = run.durationS > 0 ? Math.min(1, elapsedS / run.durationS) : 1;
+      const position = positionAlong(run.path, progress);
+      // Sample a little further along to work out which way it is pointing.
+      const ahead = positionAlong(run.path, Math.min(1, progress + 0.008));
+
       return {
         ...run,
         progress,
-        position: positionAlong(run.path, progress),
-        remainingS: Math.max(0, (run.durationS - elapsedS) / speed),
+        position,
+        heading: headingDeg(position, ahead),
+        /**
+         * Journey time left, not wall-clock time left.
+         *
+         * Sped-up playback finishes an eleven minute run in thirty seconds, and
+         * an ETA counting down in real seconds would read "0 min" almost at
+         * once. The driver's remaining journey is the honest number and the one
+         * anybody tracking a vehicle expects to see.
+         */
+        remainingS: Math.max(0, run.durationS - elapsedS),
         stopsDone: run.fractions.filter((fraction) => progress >= fraction).length,
         finished: progress >= 1,
       };
