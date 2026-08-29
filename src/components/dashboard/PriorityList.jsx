@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { ListOrdered, Inbox } from 'lucide-react';
+import { ListOrdered, Inbox, Zap } from 'lucide-react';
 import { useEcoBin } from '../../context/EcoBinContext';
 import { PRIORITY_META, priorityRanking } from '../../lib/telemetry';
 import { Card, CardHeader, EmptyState, cx } from '../ui/Primitives';
@@ -77,7 +77,8 @@ const Row = ({ rank, entry, selected, onSelect }) => {
  * taken on faith.
  */
 export const PriorityList = ({ limit = 6 }) => {
-  const { bins, settings, selectedChannelId, setSelectedChannelId, setPage } = useEcoBin();
+  const { bins, settings, trucks, selectedChannelId, setSelectedChannelId, setPage } = useEcoBin();
+  const auto = settings.autoDispatch;
 
   const ranked = useMemo(
     () => priorityRanking(bins, { thresholds: settings.thresholds }),
@@ -96,7 +97,17 @@ export const PriorityList = ({ limit = 6 }) => {
             : `${urgent} of ${bins.length} bin${bins.length === 1 ? '' : 's'} need attention now`
         }
         action={
-          bins.length > limit ? (
+          auto?.enabled ? (
+            <button
+              type="button"
+              onClick={() => setPage('settings')}
+              title={`Trucks are dispatched automatically at priority ${auto.minScore} and above`}
+              className="flex shrink-0 items-center gap-1 rounded-md bg-emerald-50 px-1.5 py-1 text-[10px] font-extrabold uppercase tracking-wide text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400"
+            >
+              <Zap className="h-3 w-3" />
+              Auto ≥{auto.minScore}
+            </button>
+          ) : bins.length > limit ? (
             <button
               type="button"
               onClick={() => setPage('bins')}
@@ -131,7 +142,9 @@ export const PriorityList = ({ limit = 6 }) => {
 
       <p className="mt-auto flex items-center gap-1.5 border-t border-slate-100 px-5 py-2.5 text-[10px] text-slate-400 dark:border-slate-800">
         <ListOrdered className="h-3 w-3 shrink-0" />
-        Fullest and fastest-filling first; dispatched bins drop down the list.
+        {auto?.enabled && trucks.length === 0
+          ? 'Auto-dispatch is on but the fleet is empty — add a truck to enable it.'
+          : 'Fullest and fastest-filling first; dispatched bins drop down the list.'}
       </p>
     </Card>
   );

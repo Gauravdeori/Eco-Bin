@@ -61,6 +61,21 @@ export const DEFAULT_SETTINGS = {
   collectionDropPercent: 25,
 
   /**
+   * Hands-off dispatch.
+   *
+   * Off by default and deliberately so: sending a truck is a real-world action
+   * with a cost, and it should be something the operator switches on knowingly
+   * rather than something that starts happening after an update.
+   */
+  autoDispatch: {
+    enabled: false,
+    /** Priority score a bin must reach before a truck is sent unprompted. */
+    minScore: 70,
+    /** How long a bin is left alone after an operator calls off its dispatch. */
+    cooldownMinutes: 30,
+  },
+
+  /**
    * Where the location picker opens when a bin has no coordinate yet.
    * Set it to the city you operate in so you are not starting from a world map.
    */
@@ -93,6 +108,7 @@ export const loadSettings = () => {
       ...saved,
       fieldMap: { ...DEFAULT_SETTINGS.fieldMap, ...(saved.fieldMap || {}) },
       thresholds: { ...DEFAULT_SETTINGS.thresholds, ...(saved.thresholds || {}) },
+      autoDispatch: { ...DEFAULT_SETTINGS.autoDispatch, ...(saved.autoDispatch || {}) },
       mapCenter: { ...DEFAULT_SETTINGS.mapCenter, ...(saved.mapCenter || {}) },
       binMeta: { ...DEFAULT_SETTINGS.binMeta, ...(saved.binMeta || {}) },
     };

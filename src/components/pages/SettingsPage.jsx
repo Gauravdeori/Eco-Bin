@@ -122,9 +122,16 @@ const AddChannel = ({ onAdd, existing }) => {
 };
 
 export const SettingsPage = () => {
-  const { settings, updateSettings, resetSettings, bins, linkErrors, lastSync, refresh } =
+  const { settings, updateSettings, resetSettings, bins, trucks, linkErrors, lastSync, refresh } =
     useEcoBin();
   const [picking, setPicking] = useState(null);
+
+  const auto = settings.autoDispatch;
+  const patchAuto = (patch) =>
+    updateSettings((current) => ({
+      ...current,
+      autoDispatch: { ...current.autoDispatch, ...patch },
+    }));
 
   const addChannel = (channel) =>
     updateSettings((current) => ({ ...current, channels: [...current.channels, channel] }));
@@ -327,6 +334,71 @@ export const SettingsPage = () => {
                 </select>
               </div>
             ))}
+          </div>
+        </Card>
+
+        <Card>
+          <CardHeader
+            title="Auto-dispatch"
+            subtitle="Let the dashboard send trucks without being asked"
+          />
+          <div className="space-y-3 px-5 pb-5">
+            <label className="flex items-start gap-3 rounded-xl bg-slate-50 p-3 dark:bg-slate-800/60">
+              <input
+                type="checkbox"
+                checked={auto.enabled}
+                onChange={(event) => patchAuto({ enabled: event.target.checked })}
+                className="mt-0.5 h-4 w-4 shrink-0 accent-emerald-600"
+              />
+              <span className="min-w-0">
+                <span className="block text-xs font-bold text-slate-900 dark:text-white">
+                  Assign trucks automatically
+                </span>
+                <span className="mt-0.5 block text-[11px] text-slate-500 dark:text-slate-400">
+                  A bin is dispatched only when it is both urgent enough and actually needs
+                  emptying. Silent bins and flat batteries raise alerts, never trucks.
+                </span>
+              </span>
+            </label>
+
+            <Field
+              label={`Dispatch at priority ${auto.minScore} and above`}
+              hint="Lower sends trucks sooner and more often. 70 is roughly a full bin."
+            >
+              <input
+                type="range"
+                min="40"
+                max="95"
+                value={auto.minScore}
+                disabled={!auto.enabled}
+                onChange={(event) => patchAuto({ minScore: Number(event.target.value) })}
+                className="w-full text-emerald-600 disabled:opacity-40"
+              />
+            </Field>
+
+            <Field
+              label="Pause after a cancelled dispatch (minutes)"
+              hint="Calling off a truck holds that bin back, so auto-dispatch does not overrule you."
+            >
+              <input
+                type="number"
+                min="0"
+                max="1440"
+                value={auto.cooldownMinutes}
+                disabled={!auto.enabled}
+                onChange={(event) =>
+                  patchAuto({ cooldownMinutes: Math.max(0, Number(event.target.value) || 0) })
+                }
+                className={cx(inputClass, 'disabled:opacity-40')}
+              />
+            </Field>
+
+            {auto.enabled && trucks.length === 0 && (
+              <p className="rounded-xl bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-700 dark:bg-amber-500/10 dark:text-amber-400">
+                No trucks in the fleet yet — add one on the Trucks page or nothing can be
+                dispatched.
+              </p>
+            )}
           </div>
         </Card>
 

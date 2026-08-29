@@ -468,7 +468,9 @@ export const binPriority = (bin, { thresholds, now = Date.now() }) => {
   // the top of a list of things nobody has dealt with yet.
   if (bin.assignment) {
     score *= 0.25;
-    reasons.unshift(`${bin.assignment.truckId} en route`);
+    reasons.unshift(
+      `${bin.assignment.truckId} en route${bin.assignment.auto ? ' (auto)' : ''}`,
+    );
   }
 
   // Parked by the operator, so it is not a collection decision any more.
@@ -488,7 +490,18 @@ export const binPriority = (bin, { thresholds, now = Date.now() }) => {
           ? PRIORITY.MEDIUM
           : PRIORITY.LOW;
 
-  return { score, level, reasons, fillRate, hoursToFull };
+  // Urgency alone does not justify a truck. A silent bin on a flat battery
+  // scores high and needs an engineer, not a collection. This is the separate
+  // question of whether *emptying* the bin is the right response, and
+  // auto-dispatch requires both.
+  const needsCollection = Boolean(
+    (bin.fill !== null && bin.fill >= thresholds.full) ||
+      (hoursToFull !== null && hoursToFull <= 1) ||
+      (bin.capacityKg && bin.weight !== null && bin.weight >= bin.capacityKg) ||
+      bin.openReport?.issueType === 'Overflowing',
+  );
+
+  return { score, level, reasons, fillRate, hoursToFull, needsCollection };
 };
 
 /** Every bin, most urgent first. Ties break on the fuller bin. */

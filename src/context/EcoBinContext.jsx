@@ -15,6 +15,7 @@ import {
   applyOverlays,
   buildBin,
   collectionTrend,
+  priorityRanking,
   statusDistribution,
 } from '../lib/telemetry';
 
@@ -70,6 +71,8 @@ export const EcoBinProvider = ({ children }) => {
   const [trucks, setTrucks] = useLocalState('ecobin.trucks.v1', []);
   const [assignments, setAssignments] = useLocalState('ecobin.assignments.v1', {});
   const [maintenance, setMaintenance] = useLocalState('ecobin.maintenance.v1', {});
+  /** channelId → epoch ms until which auto-dispatch leaves a bin alone. */
+  const [dispatchHolds, setDispatchHolds] = useLocalState('ecobin.dispatchholds.v1', {});
 
   /* ── UI state ───────────────────────────────────────────────────────────── */
   const [selectedChannelId, setSelectedChannelId] = useState(null);
@@ -165,7 +168,15 @@ export const EcoBinProvider = ({ children }) => {
           channelId: bin.channelId,
         });
         setAssignments((current) => {
-          if (!current[bin.channelId]) return current;
+          const assignment = current[bin.channelId];
+          if (!assignment) return current;
+          // The run is over, so the truck returns to the idle pool. Without
+          // this it stays ON_ROUTE for ever and is never dispatched again.
+          setTrucks((fleet) =>
+            fleet.map((truck) =>
+              truck.id === assignment.truckId ? { ...truck, status: 'IDLE' } : truck,
+            ),
+          );
           const next = { ...current };
           delete next[bin.channelId];
           return next;
@@ -188,7 +199,7 @@ export const EcoBinProvider = ({ children }) => {
         });
       }
     });
-  }, [telemetryBins, pushAlert, setAssignments, setReports, settings.thresholds.filling]);
+  }, [telemetryBins, pushAlert, setAssignments, setReports, setTrucks, settings.thresholds.filling]);
 
   /* ── aggregate stats, all computed from live readings ───────────────────── */
   const stats = useMemo(() => {
@@ -255,6 +266,97 @@ export const EcoBinProvider = ({ children }) => {
     [bins],
   );
 
+  /* ── hands-off dispatch ─────────────────────────────────────────────────── */
+
+  /**
+   * Trucks carry no position, so "nearest" is not a question this data can
+   * answer and pretending otherwise would be a lie in the UI. Fit is the
+   * honest rule instead: the smallest truck that can still take the load, so
+   * the big one stays free for the next full bin.
+   */
+  const pickTruck = (bin, pool) => {
+    const fits = pool.filter(
+      (truck) => !truck.capacityKg || bin.weight === null || truck.capacityKg >= bin.weight,
+    );
+    return [...(fits.length ? fits : pool)].sort(
+      (a, b) => (a.capacityKg ?? Infinity) - (b.capacityKg ?? Infinity),
+    )[0];
+  };
+
+  const autoDispatch = settings.autoDispatch;
+
+  useEffect(() => {
+    if (!autoDispatch?.enabled) return;
+
+    const now = Date.now();
+    const idle = trucks.filter((truck) => truck.status === 'IDLE');
+    if (idle.length === 0) return;
+
+    const candidates = priorityRanking(bins, { thresholds: settings.thresholds, now }).filter(
+      (entry) =>
+        entry.score >= autoDispatch.minScore &&
+        // Urgent AND actually a collection job — see binPriority.
+        entry.needsCollection &&
+        !entry.bin.assignment &&
+        // An operator who called off a dispatch is not overruled on the next poll.
+        !(dispatchHolds[entry.bin.channelId] > now),
+    );
+    if (candidates.length === 0) return;
+
+    // Pair up front rather than calling assignTruck in a loop: that reads the
+    // fleet from a stale closure and would hand the same truck to every bin.
+    const pool = [...idle];
+    const pairs = [];
+    candidates.forEach((entry) => {
+      if (pool.length === 0) return;
+      const truck = pickTruck(entry.bin, pool);
+      pool.splice(pool.indexOf(truck), 1);
+      pairs.push({ entry, truck });
+    });
+    if (pairs.length === 0) return;
+
+    setAssignments((current) => {
+      const next = { ...current };
+      pairs.forEach(({ entry, truck }) => {
+        // Re-check under the updater: a manual assignment may have landed first.
+        if (next[entry.bin.channelId]) return;
+        next[entry.bin.channelId] = {
+          truckId: truck.id,
+          driver: truck.driver,
+          at: new Date().toISOString(),
+          auto: true,
+        };
+      });
+      return next;
+    });
+
+    setTrucks((fleet) =>
+      fleet.map((truck) =>
+        pairs.some((pair) => pair.truck.id === truck.id)
+          ? { ...truck, status: 'ON_ROUTE' }
+          : truck,
+      ),
+    );
+
+    pairs.forEach(({ entry, truck }) => {
+      pushAlert({
+        kind: 'DISPATCH',
+        title: `${truck.id} auto-assigned to ${entry.bin.id}`,
+        detail: `Priority ${entry.score} · ${entry.reasons[0] ?? entry.bin.location}`,
+        channelId: entry.bin.channelId,
+      });
+    });
+  }, [
+    bins,
+    trucks,
+    dispatchHolds,
+    autoDispatch,
+    settings.thresholds,
+    setAssignments,
+    setTrucks,
+    pushAlert,
+  ]);
+
   /* ── actions ────────────────────────────────────────────────────────────── */
   const assignTruck = useCallback(
     (channelId, truckId) => {
@@ -297,8 +399,20 @@ export const EcoBinProvider = ({ children }) => {
         delete next[channelId];
         return next;
       });
+
+      // Calling off a dispatch is a decision, and auto-dispatch would otherwise
+      // undo it on the very next poll. Hold this bin back for a while, and drop
+      // holds that have already lapsed rather than letting the map grow.
+      const until = Date.now() + (settings.autoDispatch?.cooldownMinutes ?? 30) * 60 * 1000;
+      setDispatchHolds((current) => {
+        const next = { [channelId]: until };
+        Object.entries(current).forEach(([id, expires]) => {
+          if (expires > Date.now() && id !== channelId) next[id] = expires;
+        });
+        return next;
+      });
     },
-    [setAssignments, setTrucks],
+    [setAssignments, setTrucks, setDispatchHolds, settings.autoDispatch],
   );
 
   const toggleMaintenance = useCallback(
@@ -400,6 +514,7 @@ export const EcoBinProvider = ({ children }) => {
     trucks,
     assignments,
     maintenance,
+    dispatchHolds,
     stats,
     analytics,
     assignTruck,
