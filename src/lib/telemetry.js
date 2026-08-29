@@ -389,6 +389,21 @@ export const fillRatePerHour = (bin, { windowHours = 6, now = Date.now() } = {})
 };
 
 /**
+ * Which band a priority score falls in.
+ *
+ * Shared so a bin and a whole collection run are read on one scale: a route
+ * coloured red means the same thing as a bin badged red.
+ */
+export const priorityLevel = (score) =>
+  score >= 70
+    ? PRIORITY.CRITICAL
+    : score >= 45
+      ? PRIORITY.HIGH
+      : score >= 22
+        ? PRIORITY.MEDIUM
+        : PRIORITY.LOW;
+
+/**
  * Scores one bin on how urgently it needs a human, and says why.
  *
  * The score is additive so the reasons stay legible: every term that fires
@@ -481,14 +496,7 @@ export const binPriority = (bin, { thresholds, now = Date.now() }) => {
 
   score = Math.round(Math.max(0, Math.min(100, score)));
 
-  const level =
-    score >= 70
-      ? PRIORITY.CRITICAL
-      : score >= 45
-        ? PRIORITY.HIGH
-        : score >= 22
-          ? PRIORITY.MEDIUM
-          : PRIORITY.LOW;
+  const level = priorityLevel(score);
 
   // Urgency alone does not justify a truck. A silent bin on a flat battery
   // scores high and needs an engineer, not a collection. This is the separate

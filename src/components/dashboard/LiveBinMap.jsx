@@ -3,7 +3,15 @@ import { MapContainer, Marker, Polyline, Popup, TileLayer, useMap } from 'react-
 import L from 'leaflet';
 import { MapPin, Filter, Navigation, AlertTriangle, Route, Loader2, X, Leaf, Truck } from 'lucide-react';
 import { useEcoBin } from '../../context/EcoBinContext';
-import { STATUS, STATUS_META, suspiciousCoords } from '../../lib/telemetry';
+import {
+  PRIORITY,
+  PRIORITY_META,
+  STATUS,
+  STATUS_META,
+  binPriority,
+  priorityLevel,
+  suspiciousCoords,
+} from '../../lib/telemetry';
 import { planRoute, formatDistance, formatDuration } from '../../services/routing';
 import { emissionsFor, emissionsSaved, formatCo2 } from '../../lib/emissions';
 import { Card, EmptyState, cx, Button } from '../ui/Primitives';
@@ -51,10 +59,15 @@ const markerIcon = (bin, selected, seq = null) => {
 };
 
 /**
- * One colour per truck, so two runs crossing the same street stay apart.
- * The first is the blue a live-tracking map is expected to be.
+ * Route colour is the priority scale, not a per-truck palette.
+ *
+ * The question an operator asks looking at a map of routes is which one is
+ * worst, and a colour that only says "this is truck three" cannot answer it.
+ * Runs are coloured on exactly the scale their bins are, so a red lane and a
+ * red bin badge mean the same thing. Trucks stay told apart by the ID on the
+ * marker rather than by hue.
  */
-export const RUN_COLOURS = ['#276ef1', '#8b5cf6', '#f59e0b', '#ec4899', '#14b8a6', '#84cc16'];
+const ROUTE_ORDER = [PRIORITY.CRITICAL, PRIORITY.HIGH, PRIORITY.MEDIUM, PRIORITY.LOW];
 
 const truckIcon = (label, colour, heading) =>
   L.divIcon({
@@ -112,6 +125,7 @@ const FitBounds = ({ points }) => {
 const TrackingCard = ({ run, colour, onCancel, onFocusBin }) => {
   const nextIndex = Math.min(run.stopsDone, run.stops.length - 1);
   const arrived = run.stopsDone >= run.stops.length;
+  const band = PRIORITY_META[run.level];
 
   return (
     <div className="pointer-events-auto w-[268px] rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-xl backdrop-blur dark:border-slate-700 dark:bg-slate-900/95">
@@ -126,8 +140,14 @@ const TrackingCard = ({ run, colour, onCancel, onFocusBin }) => {
           <p className="truncate text-xs font-bold text-slate-900 dark:text-white">
             {run.driver || 'Driver'}
           </p>
-          <p className="truncate text-[11px] text-slate-500 dark:text-slate-400">
-            {run.truckId} · {run.loadKg} kg load
+          <p className="flex items-center gap-1.5 truncate text-[11px] text-slate-500 dark:text-slate-400">
+            <span
+              className="shrink-0 rounded px-1 py-0.5 text-[9px] font-extrabold uppercase tracking-wide text-white"
+              style={{ background: colour }}
+            >
+              {arrived ? 'Done' : band.label}
+            </span>
+            {run.truckId} · {run.loadKg} kg
           </p>
         </div>
         <div className="shrink-0 text-right">
@@ -161,6 +181,9 @@ const TrackingCard = ({ run, colour, onCancel, onFocusBin }) => {
             <>
               Next stop <b className="text-slate-900 dark:text-white">{run.stopNames[nextIndex]}</b>
               {run.stops.length > 1 ? ` · ${run.stopsDone} of ${run.stops.length} done` : ''}
+              {run.criticalStops > 0
+                ? ` · ${run.criticalStops} critical left`
+                : ''}
             </>
           )}
         </span>
@@ -251,6 +274,15 @@ export const LiveBinMap = ({ height = 'h-[340px]', scrollZoom = false }) => {
     route?.bins?.forEach((bin, index) => map.set(bin.channelId, index + 1));
     return map;
   }, [route]);
+
+  /** The preview route is banded the same way a live run is. */
+  const routeLevel = useMemo(() => {
+    if (!route?.bins?.length) return PRIORITY.LOW;
+    const scores = route.bins.map(
+      (bin) => binPriority(bin, { thresholds: settings.thresholds }).score,
+    );
+    return priorityLevel(Math.round(scores.reduce((a, b) => a + b, 0) / scores.length));
+  }, [route, settings.thresholds]);
 
   const savings = route
     ? emissionsSaved(
@@ -446,14 +478,36 @@ export const LiveBinMap = ({ height = 'h-[340px]', scrollZoom = false }) => {
       )}
 
       <div className={cx('relative mx-4 overflow-hidden rounded-xl', height)}>
+        {/* What the lane colours mean. Only shown when there is a lane. */}
+        {(fleetRuns.length > 0 || route) && (
+          <div className="pointer-events-none absolute bottom-3 right-3 z-[1000] rounded-xl border border-slate-200 bg-white/95 px-2.5 py-2 shadow-lg backdrop-blur dark:border-slate-700 dark:bg-slate-900/95">
+            <p className="mb-1 text-[9px] font-bold uppercase tracking-wide text-slate-400">
+              Route urgency
+            </p>
+            <div className="flex flex-col gap-1">
+              {ROUTE_ORDER.map((level) => (
+                <span key={level} className="flex items-center gap-1.5">
+                  <span
+                    className="h-1 w-5 shrink-0 rounded-full"
+                    style={{ background: PRIORITY_META[level].hex }}
+                  />
+                  <span className="text-[10px] font-semibold text-slate-600 dark:text-slate-300">
+                    {PRIORITY_META[level].label}
+                  </span>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Live tracking, floated over the map like a ride-hailing app. */}
         {fleetRuns.length > 0 && (
           <div className="pointer-events-none absolute left-3 top-3 z-[1000] flex max-h-[calc(100%-24px)] flex-col gap-2 overflow-y-auto">
-            {fleetRuns.map((run, index) => (
+            {fleetRuns.map((run) => (
               <TrackingCard
                 key={run.truckId}
                 run={run}
-                colour={RUN_COLOURS[index % RUN_COLOURS.length]}
+                colour={PRIORITY_META[run.level].hex}
                 onCancel={cancelRun}
                 onFocusBin={setSelectedChannelId}
               />
@@ -487,13 +541,21 @@ export const LiveBinMap = ({ height = 'h-[340px]', scrollZoom = false }) => {
               <>
                 {/* Casing under the line keeps it legible over busy streets. */}
                 <Polyline positions={route.path} color="#0f172a" weight={7} opacity={0.25} />
-                <Polyline positions={route.path} color="#0ea5e9" weight={4} opacity={0.95} />
+                <Polyline
+                  positions={route.path}
+                  color={PRIORITY_META[routeLevel].hex}
+                  weight={4}
+                  opacity={0.95}
+                />
               </>
             )}
 
-            {/* Live fleet: one coloured line per truck, and the truck on it. */}
-            {fleetRuns.map((run, index) => {
-              const colour = RUN_COLOURS[index % RUN_COLOURS.length];
+            {/* Live fleet: each run coloured by how urgent its remaining stops
+                are, worst drawn last so it sits on top where lanes overlap. */}
+            {[...fleetRuns]
+              .sort((a, b) => a.urgency - b.urgency)
+              .map((run) => {
+              const colour = PRIORITY_META[run.level].hex;
               return (
                 <React.Fragment key={run.truckId}>
                   <Polyline positions={run.path} color="#0f172a" weight={7} opacity={0.2} />

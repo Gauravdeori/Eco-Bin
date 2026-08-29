@@ -18,6 +18,7 @@ import {
   buildBin,
   binPriority,
   collectionTrend,
+  priorityLevel,
   priorityRanking,
   statusDistribution,
 } from '../lib/telemetry';
@@ -569,7 +570,55 @@ export const EcoBinProvider = ({ children }) => {
       // Sample a little further along to work out which way it is pointing.
       const ahead = positionAlong(run.path, Math.min(1, progress + 0.008));
 
+      /**
+       * How urgent the rest of this run is, on the same scale as a single bin.
+       *
+       * Measured over the stops still to be collected, not every stop on the
+       * route: a run's urgency is the work it has left, so it cools from red
+       * towards green as the truck empties its way round rather than staying
+       * red all the way back to the depot.
+       *
+       * The average is the base, because the question a route colour answers is
+       * how bad this run is overall. A single critical bin among four quiet
+       * ones is not a red route, so the count of critical stops is carried
+       * separately rather than being allowed to swing the whole line.
+       *
+       * How many of the stops are actually over the full threshold then lifts
+       * it. Averaging alone is too forgiving at the top: a run where every bin
+       * sits in the eighties averages just under the critical band and draws
+       * orange, when a route made entirely of full bins is the exact thing an
+       * operator needs to see in red. The share of full stops is what closes
+       * that gap, and it cannot rescue a run that is mostly empty.
+       */
+      const stillToDo = run.stops
+        .filter((channelId) => !run.collected.includes(channelId))
+        .map((channelId) => bins.find((bin) => bin.channelId === channelId))
+        .filter(Boolean);
+
+      const remaining = stillToDo.map((bin) =>
+        binPriority(bin, { thresholds: settings.thresholds }),
+      );
+
+      const fullShare = remaining.length
+        ? stillToDo.filter((bin) => bin.fill !== null && bin.fill >= settings.thresholds.full)
+            .length / remaining.length
+        : 0;
+
+      const urgency = remaining.length
+        ? Math.min(
+            100,
+            Math.round(
+              remaining.reduce((total, item) => total + item.score, 0) / remaining.length +
+                fullShare * 15,
+            ),
+          )
+        : 0;
+
       return {
+        urgency,
+        level: priorityLevel(urgency),
+        criticalStops: remaining.filter((item) => item.score >= 70).length,
+        stopsLeft: remaining.length,
         ...run,
         progress,
         position,
@@ -587,7 +636,7 @@ export const EcoBinProvider = ({ children }) => {
         finished: progress >= 1,
       };
     });
-  }, [runs, clock, settings.simulation?.speed]);
+  }, [runs, clock, bins, settings.simulation?.speed, settings.thresholds]);
 
   /** Arrivals, and runs that have made it back to the depot. */
   useEffect(() => {

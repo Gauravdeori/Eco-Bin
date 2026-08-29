@@ -1,9 +1,9 @@
 import React from 'react';
 import { Truck, MapPin } from 'lucide-react';
 import { useEcoBin } from '../../context/EcoBinContext';
-import { STATUS, STATUS_META } from '../../lib/telemetry';
+import { PRIORITY_META, STATUS, STATUS_META } from '../../lib/telemetry';
 import { formatDistance, formatDuration } from '../../services/routing';
-import { Card, EmptyState, Button, Meter, cx } from '../ui/Primitives';
+import { Card, EmptyState, Button, cx } from '../ui/Primitives';
 
 const TRUCK_STATUS = {
   ON_ROUTE: { label: 'On Route', className: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300' },
@@ -98,13 +98,25 @@ export const TrucksPanel = ({ limit }) => {
                           ? ` · ${run.stopNames[Math.min(run.stopsDone, run.stops.length - 1)]}`
                           : ''}
                       </p>
-                      <Meter
-                        value={Math.round(run.progress * 100)}
-                        color="bg-emerald-500"
-                        className="mt-1.5"
-                      />
+                      {/* Same scale as the lane on the map, so a red bar here
+                          and a red route there are the same fact. */}
+                      <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+                        <span
+                          className="block h-full rounded-full transition-[width] duration-1000 ease-linear"
+                          style={{
+                            width: `${Math.round(run.progress * 100)}%`,
+                            background: PRIORITY_META[run.level].hex,
+                          }}
+                        />
+                      </div>
                       <p className="mt-1 flex items-center justify-between text-[10px] text-slate-400">
                         <span className="tabular">
+                          <span
+                            className="mr-1 font-bold"
+                            style={{ color: PRIORITY_META[run.level].hex }}
+                          >
+                            {PRIORITY_META[run.level].label}
+                          </span>
                           {formatDistance(run.distanceM)} · {run.loadKg} kg
                         </span>
                         <span className="tabular">{formatDuration(run.remainingS)} left</span>
