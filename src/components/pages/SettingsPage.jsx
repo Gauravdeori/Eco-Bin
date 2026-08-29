@@ -3,6 +3,7 @@ import { Plus, Trash, RotateCcw, CheckCircle2, XCircle, Loader2, Radio, Map, Shi
 import { useEcoBin } from '../../context/EcoBinContext';
 import { fetchChannelFeed } from '../../services/thingspeak';
 import { formatRelative, validCoords } from '../../lib/telemetry';
+import { fetchCommands } from '../../services/n8n';
 import { SIMULATED_COUNT } from '../../lib/simulation';
 import { DIESEL_KG_CO2_PER_LITRE } from '../../lib/emissions';
 import { Card, CardHeader, EmptyState, Field, Button, inputClass, cx } from '../ui/Primitives';
@@ -129,6 +130,21 @@ export const SettingsPage = () => {
   const [picking, setPicking] = useState(null);
 
   const auto = settings.autoDispatch;
+  const n8n = settings.n8n;
+  const [n8nTest, setN8nTest] = useState(null);
+
+  const patchN8n = (patch) =>
+    updateSettings((current) => ({ ...current, n8n: { ...current.n8n, ...patch } }));
+
+  const testN8n = async () => {
+    setN8nTest({ state: 'testing' });
+    try {
+      const commands = await fetchCommands(n8n.url);
+      setN8nTest({ state: 'ok', count: commands.length });
+    } catch (error) {
+      setN8nTest({ state: 'error', message: error.message });
+    }
+  };
   const patchAuto = (patch) =>
     updateSettings((current) => ({
       ...current,
@@ -447,6 +463,111 @@ export const SettingsPage = () => {
                 className={inputClass}
               />
             </Field>
+          </div>
+        </Card>
+
+        <Card>
+          <CardHeader
+            title="n8n dispatch control"
+            subtitle="Hand the decision to send a truck to a workflow"
+          />
+          <div className="space-y-3 px-5 pb-5">
+            <p className="rounded-xl bg-slate-50 px-3 py-2 text-[11px] leading-relaxed text-slate-600 dark:bg-slate-800/60 dark:text-slate-300">
+              EcoBin has no server, so n8n cannot push to it. Point this at an n8n
+              <b> Webhook</b> node set to GET, ending in <b>Respond to Webhook</b>, and the
+              dashboard will ask it what to dispatch. The workflow has to send CORS headers
+              for this page&apos;s address.
+            </p>
+
+            <label className="flex items-start gap-3 rounded-xl bg-slate-50 p-3 dark:bg-slate-800/60">
+              <input
+                type="checkbox"
+                checked={n8n?.enabled ?? false}
+                onChange={(event) => patchN8n({ enabled: event.target.checked })}
+                className="mt-0.5 h-4 w-4 shrink-0 accent-emerald-600"
+              />
+              <span className="min-w-0">
+                <span className="block text-xs font-bold text-slate-900 dark:text-white">
+                  Take dispatch commands from n8n
+                </span>
+                <span className="mt-0.5 block text-[11px] text-slate-500 dark:text-slate-400">
+                  Polled every {n8n?.pollSeconds ?? 10}s. A command is acted on once, so a
+                  webhook that keeps returning the same row will not send the same truck twice.
+                </span>
+              </span>
+            </label>
+
+            <Field
+              label="Webhook URL"
+              hint="The production URL. A test webhook only listens while the workflow is open."
+            >
+              <input
+                value={n8n?.url ?? ''}
+                onChange={(event) => patchN8n({ url: event.target.value.trim() })}
+                placeholder="https://your-n8n/webhook/ecobin-dispatch"
+                className={inputClass}
+              />
+            </Field>
+
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Poll interval (seconds)">
+                <input
+                  type="number"
+                  min="3"
+                  max="300"
+                  value={n8n?.pollSeconds ?? 10}
+                  onChange={(event) =>
+                    patchN8n({ pollSeconds: Math.max(3, Number(event.target.value) || 10) })
+                  }
+                  className={inputClass}
+                />
+              </Field>
+              <div className="flex items-end">
+                <Button onClick={testN8n} disabled={!n8n?.url || n8nTest?.state === 'testing'}>
+                  {n8nTest?.state === 'testing' ? 'Testing…' : 'Test connection'}
+                </Button>
+              </div>
+            </div>
+
+            {n8nTest?.state === 'ok' && (
+              <p className="rounded-xl bg-emerald-50 px-3 py-2 text-[11px] font-semibold text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400">
+                Reached the workflow. {n8nTest.count} command
+                {n8nTest.count === 1 ? '' : 's'} waiting.
+              </p>
+            )}
+            {n8nTest?.state === 'error' && (
+              <p className="rounded-xl bg-rose-50 px-3 py-2 text-[11px] font-semibold text-rose-700 dark:bg-rose-500/10 dark:text-rose-400">
+                {n8nTest.message}
+              </p>
+            )}
+
+            <label className="flex items-start gap-3 rounded-xl bg-slate-50 p-3 dark:bg-slate-800/60">
+              <input
+                type="checkbox"
+                checked={n8n?.lockManual ?? true}
+                disabled={!n8n?.enabled}
+                onChange={(event) => patchN8n({ lockManual: event.target.checked })}
+                className="mt-0.5 h-4 w-4 shrink-0 accent-emerald-600 disabled:opacity-40"
+              />
+              <span className="min-w-0">
+                <span className="block text-xs font-bold text-slate-900 dark:text-white">
+                  Stop the dispatch buttons working by hand
+                </span>
+                <span className="mt-0.5 block text-[11px] text-slate-500 dark:text-slate-400">
+                  The buttons read &ldquo;Waiting on n8n&rdquo; and do nothing until the workflow
+                  asks. Cancelling a dispatch stays manual, so an operator can always call a
+                  truck back.
+                </span>
+              </span>
+            </label>
+
+            <p className="rounded-xl border border-slate-200 px-3 py-2 font-mono text-[10px] leading-relaxed text-slate-500 dark:border-slate-700 dark:text-slate-400">
+              Respond with, e.g.
+              <br />
+              {'[{ "channelId": "2345678", "action": "DISPATCH",'}
+              <br />
+              {'   "commandId": "{{ $execution.id }}" }]'}
+            </p>
           </div>
         </Card>
 

@@ -276,6 +276,7 @@ export const LiveBinMap = ({ height = 'h-[340px]', scrollZoom = false }) => {
     planning,
     depotPoint,
     cancelRun,
+    dispatchLocked,
   } = useEcoBin();
   const iconFor = useIconCache();
   const [filter, setFilter] = useState('ALL');
@@ -719,9 +720,15 @@ export const LiveBinMap = ({ height = 'h-[340px]', scrollZoom = false }) => {
                       <button
                         type="button"
                         onClick={() => assignTruck(bin.channelId)}
-                        className="mt-2.5 w-full rounded-lg bg-emerald-600 px-3 py-1.5 text-[11px] font-bold text-white hover:bg-emerald-500"
+                        disabled={dispatchLocked}
+                        title={
+                          dispatchLocked
+                            ? 'Dispatch is controlled by n8n'
+                            : undefined
+                        }
+                        className="mt-2.5 w-full rounded-lg bg-emerald-600 px-3 py-1.5 text-[11px] font-bold text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
                       >
-                        Dispatch a truck
+                        {dispatchLocked ? 'Waiting on n8n' : 'Dispatch a truck'}
                       </button>
                     )}
                   </div>

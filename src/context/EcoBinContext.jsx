@@ -12,6 +12,7 @@ import { useThingSpeak } from '../hooks/useThingSpeak';
 import { useLocalState } from '../hooks/useLocalState';
 import { simulatedBins } from '../lib/simulation';
 import { headingDeg, planFleetRuns, positionAlong, sweepPartition } from '../services/fleet';
+import { fetchCommands } from '../services/n8n';
 import {
   STATUS,
   applyOverlays,
@@ -83,6 +84,17 @@ export const EcoBinProvider = ({ children }) => {
   const [runs, setRuns] = useLocalState('ecobin.runs.v1', {});
   /** channelId → when a simulated truck last emptied it. */
   const [simCollections, setSimCollections] = useLocalState('ecobin.simcollections.v1', {});
+
+  /**
+   * Live views of state the n8n poller needs.
+   *
+   * Reading these through refs keeps them out of the poll effect's dependencies:
+   * bins change on every telemetry tick, and depending on them directly would
+   * tear down and restart the interval several times a minute.
+   */
+  const binsRef = useRef([]);
+  const assignTruckRef = useRef(() => ({ ok: false }));
+  const handledCommandsRef = useRef([]);
 
   /* ── UI state ───────────────────────────────────────────────────────────── */
   const [selectedChannelId, setSelectedChannelId] = useState(null);
@@ -834,9 +846,23 @@ export const EcoBinProvider = ({ children }) => {
     pushAlert,
   ]);
 
+  /* ── n8n dispatch control ───────────────────────────────────────────────── */
+
+  /** Commands already acted on, so a repeated poll is not a repeated dispatch. */
+  const [handledCommands, setHandledCommands] = useLocalState('ecobin.n8n.handled.v1', []);
+  const [n8nStatus, setN8nStatus] = useState({ state: 'idle', at: null, error: null });
+
+  const n8n = settings.n8n;
+  const dispatchLocked = Boolean(n8n?.enabled && n8n?.lockManual);
+
   /* ── actions ────────────────────────────────────────────────────────────── */
   const assignTruck = useCallback(
-    (channelId, truckId) => {
+    (channelId, truckId, { source = 'manual' } = {}) => {
+      // With n8n holding dispatch, a person pressing the button is not an
+      // instruction — it is the thing the workflow was put in front of.
+      if (source === 'manual' && dispatchLocked) {
+        return { ok: false, reason: 'n8n-controlled' };
+      }
       const bin = bins.find((item) => item.channelId === channelId);
       // Named truck first; otherwise the best-fitting free one, by the same
       // rule auto-dispatch uses. It used to take whichever idle truck happened
@@ -859,12 +885,12 @@ export const EcoBinProvider = ({ children }) => {
       pushAlert({
         kind: 'DISPATCH',
         title: `${truck.id} assigned to ${bin.id}`,
-        detail: bin.location,
+        detail: source === 'n8n' ? `${bin.location} · sent by n8n` : bin.location,
         channelId,
       });
       return { ok: true, truck };
     },
-    [bins, trucks, setAssignments, setTrucks, pushAlert],
+    [bins, trucks, dispatchLocked, setAssignments, setTrucks, pushAlert],
   );
 
   const clearAssignment = useCallback(
@@ -975,6 +1001,89 @@ export const EcoBinProvider = ({ children }) => {
 
   const clearAlerts = useCallback(() => setAlerts([]), [setAlerts]);
 
+  /**
+   * Keeps the poller's refs current.
+   *
+   * Declared after the actions so it can see `assignTruck`, and before the poll
+   * effect so the first poll of a new interval reads live state rather than
+   * whatever the refs held on mount.
+   */
+  useEffect(() => {
+    binsRef.current = bins;
+    assignTruckRef.current = assignTruck;
+    handledCommandsRef.current = handledCommands;
+  });
+
+  /**
+   * Polls n8n for bins it wants collected.
+   *
+   * Nothing can push into a page with no server behind it, so the workflow is
+   * asked rather than listened to. Each command carries an id and the ids that
+   * have been acted on are kept, because a webhook that keeps answering with
+   * the same row would otherwise dispatch the same bin on every tick.
+   */
+  useEffect(() => {
+    if (!n8n?.enabled || !n8n?.url) return undefined;
+
+    const controller = new AbortController();
+    let stopped = false;
+
+    const poll = async () => {
+      try {
+        const commands = await fetchCommands(n8n.url, { signal: controller.signal });
+        if (stopped) return;
+
+        setN8nStatus({ state: 'ok', at: new Date(), error: null });
+
+        const handled = new Set(handledCommandsRef.current);
+        const fresh = commands.filter((command) => !handled.has(command.id));
+        if (fresh.length === 0) return;
+
+        const accepted = [];
+        fresh.forEach((command) => {
+          // n8n may name a bin by channel or by the label an operator typed.
+          const bin =
+            binsRef.current.find((item) => item.channelId === command.bin) ??
+            binsRef.current.find((item) => item.id === command.bin);
+
+          // A command for a bin this dashboard does not have is still marked
+          // handled: it will never match, and retrying it every tick forever
+          // is worse than dropping it once.
+          accepted.push(command.id);
+          if (!bin) return;
+
+          const result = assignTruckRef.current(bin.channelId, command.truckId ?? undefined, {
+            source: 'n8n',
+          });
+          if (!result.ok) {
+            pushAlert({
+              kind: 'OFFLINE',
+              title: `n8n asked for ${bin.id} but no truck was free`,
+              detail: 'Add a truck or wait for one to finish its run.',
+              channelId: bin.channelId,
+            });
+          }
+        });
+
+        if (accepted.length > 0) {
+          setHandledCommands((current) => [...current, ...accepted].slice(-200));
+        }
+      } catch (error) {
+        if (error?.name === 'AbortError' || stopped) return;
+        setN8nStatus({ state: 'error', at: new Date(), error: error.message });
+      }
+    };
+
+    poll();
+    const id = setInterval(poll, Math.max(3, n8n.pollSeconds ?? 10) * 1000);
+
+    return () => {
+      stopped = true;
+      controller.abort();
+      clearInterval(id);
+    };
+  }, [n8n?.enabled, n8n?.url, n8n?.pollSeconds, pushAlert, setHandledCommands]);
+
   const value = {
     theme,
     setTheme,
@@ -998,6 +1107,8 @@ export const EcoBinProvider = ({ children }) => {
     maintenance,
     dispatchHolds,
     runs,
+    n8nStatus,
+    dispatchLocked,
     ranking,
     priorityByChannel,
     fleetRuns,

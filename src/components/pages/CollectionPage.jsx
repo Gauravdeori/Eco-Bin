@@ -6,7 +6,8 @@ import { CollectionProgress, CollectionActivity } from '../dashboard/CollectionP
 import { Card, CardHeader, EmptyState, StatusPill, Button, cx } from '../ui/Primitives';
 
 export const CollectionPage = () => {
-  const { bins, assignTruck, clearAssignment, trucks, setSelectedChannelId } = useEcoBin();
+  const { bins, assignTruck, clearAssignment, trucks, setSelectedChannelId, dispatchLocked } =
+    useEcoBin();
 
   const queue = useMemo(
     () =>
@@ -84,10 +85,11 @@ export const CollectionPage = () => {
                   ) : (
                     <Button
                       variant="primary"
-                      disabled={trucks.length === 0}
+                      disabled={trucks.length === 0 || dispatchLocked}
+                      title={dispatchLocked ? 'Dispatch is controlled by n8n' : undefined}
                       onClick={() => assignTruck(bin.channelId)}
                     >
-                      Assign
+                      {dispatchLocked ? 'n8n' : 'Assign'}
                     </Button>
                   )}
                 </li>

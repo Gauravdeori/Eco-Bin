@@ -87,6 +87,22 @@ export const DEFAULT_SETTINGS = {
   simulation: { enabled: true, speed: 20 },
 
   /**
+   * n8n drives dispatch instead of an operator.
+   *
+   * There is no EcoBin server, so nothing can push into the page: the dashboard
+   * polls a webhook the workflow answers with whatever is waiting to be sent.
+   * With `lockManual` on, the dispatch buttons stop working by hand and a truck
+   * only goes out when n8n says so — which is the point of handing the decision
+   * to a workflow in the first place.
+   */
+  n8n: {
+    enabled: false,
+    url: env.VITE_N8N_WEBHOOK_URL ?? '',
+    pollSeconds: num(env.VITE_N8N_POLL_SECONDS, 10),
+    lockManual: true,
+  },
+
+  /**
    * Where a collection run starts and ends. Falls back to the map centre,
    * which is the closest thing to a depot the app knows about until one is set.
    */
@@ -144,6 +160,7 @@ export const loadSettings = () => {
       thresholds: { ...DEFAULT_SETTINGS.thresholds, ...(saved.thresholds || {}) },
       autoDispatch: { ...DEFAULT_SETTINGS.autoDispatch, ...(saved.autoDispatch || {}) },
       simulation: { ...DEFAULT_SETTINGS.simulation, ...(saved.simulation || {}) },
+      n8n: { ...DEFAULT_SETTINGS.n8n, ...(saved.n8n || {}) },
       depot: { ...DEFAULT_SETTINGS.depot, ...(saved.depot || {}) },
       fleet: { ...DEFAULT_SETTINGS.fleet, ...(saved.fleet || {}) },
       mapCenter: { ...DEFAULT_SETTINGS.mapCenter, ...(saved.mapCenter || {}) },

@@ -71,8 +71,15 @@ const buildHistory = (bin) => {
 };
 
 export const BinDetailsPanel = () => {
-  const { selectedBin: bin, assignTruck, clearAssignment, toggleMaintenance, trucks, setPage } =
-    useEcoBin();
+  const {
+    selectedBin: bin,
+    assignTruck,
+    clearAssignment,
+    toggleMaintenance,
+    trucks,
+    setPage,
+    dispatchLocked,
+  } = useEcoBin();
 
   if (!bin) {
     return (
@@ -243,11 +250,21 @@ export const BinDetailsPanel = () => {
           <button
             type="button"
             onClick={() => assignTruck(bin.channelId)}
-            disabled={trucks.length === 0}
-            title={trucks.length === 0 ? 'Add a truck on the Trucks page first' : undefined}
+            disabled={trucks.length === 0 || dispatchLocked}
+            title={
+              dispatchLocked
+                ? 'Dispatch is controlled by n8n — a truck goes out when the workflow says so'
+                : trucks.length === 0
+                  ? 'Add a truck on the Trucks page first'
+                  : undefined
+            }
             className="flex-1 rounded-xl bg-brand-500 px-4 py-3 text-sm font-bold text-white transition-colors hover:bg-brand-400 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
           >
-            {trucks.length === 0 ? 'Add a truck to dispatch' : 'Dispatch a Truck'}
+            {dispatchLocked
+              ? 'Waiting on n8n'
+              : trucks.length === 0
+                ? 'Add a truck to dispatch'
+                : 'Dispatch a Truck'}
           </button>
         )}
         <button
