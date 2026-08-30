@@ -38,6 +38,10 @@ const ALERT_LIMIT = 60;
 /** How long to leave a truck alone after its route failed to plan. */
 const RETRY_AFTER_MS = 60 * 1000;
 
+/** Simulation clock granularity — see where simNow is set. */
+const SIM_TICK_MS = 15 * 1000;
+const quantise = (ms) => Math.floor(ms / SIM_TICK_MS) * SIM_TICK_MS;
+
 export const EcoBinProvider = ({ children }) => {
   /* ── configuration ──────────────────────────────────────────────────────── */
   const [settings, setSettings] = useState(loadSettings);
@@ -122,16 +126,15 @@ export const EcoBinProvider = ({ children }) => {
    * no real channel connected nothing else re-renders and the demo fleet would
    * sit frozen at whatever it read on load.
    */
-  const [simNow, setSimNow] = useState(() => Math.floor(Date.now() / 60000) * 60000);
+  const [simNow, setSimNow] = useState(() => quantise(Date.now()));
   useEffect(() => {
     if (!settings.simulation?.enabled) return undefined;
-    // The sawtooths only change a visible percentage point every couple of
-    // minutes, so rebuilding them faster manufactures fresh identities for
-    // identical-looking bins and drags every memo downstream with them. The
-    // clock is floored to the minute: eleven ticks in twelve hand setState the
-    // same value, React bails, and nothing recomputes. Trucks — the thing
-    // that visibly moves — run on their own one-second clock regardless.
-    const id = setInterval(() => setSimNow(Math.floor(Date.now() / 60000) * 60000), 5000);
+    // Quantised so that most ticks hand setState the value it already has and
+    // React bails, instead of manufacturing a fresh identity for bins that
+    // look identical and dragging every memo downstream with them. Fifteen
+    // seconds matches what a device is allowed to publish, so nothing visible
+    // is lost. Trucks run on their own one-second clock regardless.
+    const id = setInterval(() => setSimNow(quantise(Date.now())), 5000);
     return () => clearInterval(id);
   }, [settings.simulation?.enabled]);
 
@@ -202,7 +205,15 @@ export const EcoBinProvider = ({ children }) => {
       ...simulatedBins({
         centre: settings.mapCenter,
         thresholds: settings.thresholds,
-        now: simNow,
+        /**
+         * Never behind a collection that has just happened.
+         *
+         * The quantised clock can sit a few seconds in the past, and a bin is
+         * only emptied for readings at or after the pickup — so a truck
+         * arriving between ticks would have its collection ignored until the
+         * clock caught up, and the bin would sit full with its job done.
+         */
+        now: Math.max(simNow, ...Object.values(simCollections), 0),
         collections: simCollections,
       }),
     ];
@@ -337,8 +348,14 @@ export const EcoBinProvider = ({ children }) => {
        */
       const pending = assignmentsRef.current[bin.channelId];
       const run = pending ? runsRef.current[pending.truckId] : null;
-      const stillOnItsWay =
-        Boolean(pending) && (!run || !(run.collected ?? []).includes(bin.channelId));
+      /**
+       * Only a live run can say a truck has not arrived yet. Without one there
+       * is no arrival information to withhold the collection on, so the sensor
+       * is trusted — otherwise an assignment whose route failed to plan would
+       * block its own collection for ever, stranding the bin and never
+       * returning the truck to the pool.
+       */
+      const stillOnItsWay = Boolean(run) && !(run.collected ?? []).includes(bin.channelId);
 
       /**
        * A collection deferred because the truck had not arrived yet must be
