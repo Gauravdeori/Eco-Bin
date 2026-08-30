@@ -60,3 +60,13 @@ export const docPath = (key) => ['ecobin', WORKSPACE, 'state', key];
 
 /** Where n8n drops dispatch commands. */
 export const COMMANDS_PATH = ['ecobin', WORKSPACE, 'commands'];
+
+/**
+ * Where the freshest reading per channel lives, one document per bin.
+ *
+ * ThingSpeak accepts a write every fifteen seconds and is polled besides, so
+ * the history path can never be quicker than that. A device that also pushes
+ * its latest reading here reaches the screen in about a second; the history,
+ * the fill rate and the collection detection still come from ThingSpeak.
+ */
+export const LIVE_PATH = ['ecobin', WORKSPACE, 'live'];

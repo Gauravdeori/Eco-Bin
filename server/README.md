@@ -40,6 +40,7 @@ Node 18 or newer (it uses the built-in `fetch`).
 | `GET`  | `/health` | Liveness and current configuration |
 | `GET`  | `/api/bins` | Every bin, ranked, with scores and reasons |
 | `GET`  | `/api/emissions?km=14.83` | Fuel and CO2 for a distance |
+| `POST` | `/api/reading` | Push a live reading straight from the device |
 | `POST` | `/api/dispatch` | **Send a truck to one bin** |
 | `POST` | `/api/plan` | Split everything due across the free trucks and route each |
 | `POST` | `/api/tick` | Run one engine pass now instead of waiting |
@@ -67,6 +68,22 @@ every poll.
 
 `action` may be `DISPATCH`, `ASSIGN`, `COLLECT` or `FULL`. Anything else is
 acknowledged and ignored, so a workflow that emits other events does no harm.
+
+### Fast telemetry from the device
+
+ThingSpeak accepts a write every fifteen seconds, so nothing read from it can
+be fresher than that. A device that also POSTs here reaches the dashboard in
+about a second:
+
+```
+POST http://your-host:8787/api/reading
+{ "channelId": "2345678", "fill": 84, "weight": 71.5 }
+```
+
+Keep writing ThingSpeak as well — history, fill rate and collection detection
+still come from there. This path only carries "now". Field names follow the
+configured field map (`fill`, `weight`, `battery`, `temperature`, `humidity`,
+`lat`, `lng`, `category`); unset measurements stay absent rather than zero.
 
 ## The heartbeat
 

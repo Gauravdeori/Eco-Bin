@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 
 import { config, configured } from './config.js';
-import { firestoreEnabled, writeCommand } from './firestore.js';
+import { firestoreEnabled, writeCommand, writeLiveReading } from './firestore.js';
 import { dispatchBin, loadBins, planFleet, rank, tick } from './engine.js';
 import { emissionsFor } from '../../src/lib/emissions.js';
 
@@ -72,7 +72,65 @@ app.get(
   }),
 );
 
-/* ── dispatch ───────────────────────────────────────────────────────────── */
+/* ── live telemetry ingest ──────────────────────────────────────────────── */
+
+/**
+ * A reading pushed straight from the device, skipping ThingSpeak's fifteen
+ * second write cap on the way to the screen. The device keeps writing
+ * ThingSpeak too — history, fill rate and collection detection all come from
+ * there. This path is only about how fast "now" reaches the dashboard.
+ */
+app.post(
+  '/api/reading',
+  authorised,
+  wrap(async (req, res) => {
+    const body = req.body ?? {};
+    const channelId = body.channelId ?? body.channel_id ?? body.channel;
+    if (!channelId) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Name the channel: send { "channelId": "2345678", "fill": 84 }.',
+      });
+    }
+
+    // Friendly names in, ThingSpeak field numbers out, using the same mapping
+    // the rest of the system reads with. A measurement the device does not
+    // send stays absent rather than becoming a zero.
+    const entry = {
+      created_at: body.at ?? new Date().toISOString(),
+      entry_id: Date.now(),
+    };
+    let carried = 0;
+    for (const [name, fieldNumber] of Object.entries(config.fieldMap)) {
+      if (!fieldNumber) continue;
+      const value = body[name];
+      if (value === undefined || value === null || value === '') continue;
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed)) continue;
+      entry[`field${fieldNumber}`] = parsed;
+      carried += 1;
+    }
+
+    if (carried === 0) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Send at least one measurement: fill, weight, battery, temperature…',
+      });
+    }
+
+    if (!firestoreEnabled) {
+      return res.status(503).json({
+        ok: false,
+        error: 'No Firestore project configured — the live path has nowhere to go.',
+      });
+    }
+
+    await writeLiveReading(String(channelId), entry);
+    res.json({ ok: true, channelId: String(channelId), at: entry.created_at, fields: carried });
+  }),
+);
+
+/* ── dispatch ───────────────────────────────────────────────────────── */
 
 /**
  * The webhook n8n has been looking for.

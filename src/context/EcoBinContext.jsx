@@ -14,7 +14,7 @@ import { simulatedBins } from '../lib/simulation';
 import { headingDeg, planFleetRuns, positionAlong, sweepPartition } from '../services/fleet';
 import { fetchCommands } from '../services/n8n';
 import { collection, onSnapshot, runTransaction, serverTimestamp } from 'firebase/firestore';
-import { COMMANDS_PATH, WORKSPACE, firebaseConfigured, firestore } from '../services/firebase';
+import { COMMANDS_PATH, LIVE_PATH, WORKSPACE, firebaseConfigured, firestore } from '../services/firebase';
 import {
   STATUS,
   applyOverlays,
@@ -132,17 +132,63 @@ export const EcoBinProvider = ({ children }) => {
     return () => clearInterval(id);
   }, [settings.simulation?.enabled]);
 
+  /**
+   * The freshest reading per channel, pushed straight into Firestore.
+   *
+   * ThingSpeak accepts a write every fifteen seconds and is polled besides, so
+   * that path can never beat ~20 seconds to the screen. A device that also
+   * POSTs its reading to the EcoBin server (or writes this document itself)
+   * shows up here on the next tick of the network — about a second.
+   */
+  const [liveReadings, setLiveReadings] = useState({});
+
+  useEffect(() => {
+    if (!firestore) return undefined;
+    return onSnapshot(
+      collection(firestore, ...LIVE_PATH),
+      (snapshot) => {
+        const next = {};
+        snapshot.forEach((docSnap) => {
+          try {
+            next[docSnap.id] = JSON.parse(docSnap.data().json);
+          } catch {
+            /* one malformed reading is not worth losing the rest */
+          }
+        });
+        setLiveReadings(next);
+      },
+      () => {
+        /* offline or refused — polling still covers everything, just slower */
+      },
+    );
+  }, []);
+
   /* ── raw feeds → bins ───────────────────────────────────────────────────── */
   const telemetryBins = useMemo(() => {
-    const live = results.map((result, index) =>
-      buildBin(result, {
+    const live = results.map((result, index) => {
+      /**
+       * If a pushed reading is newer than the last polled entry, append it, so
+       * the whole pipeline — status, ranking, offline detection — treats it as
+       * telemetry. Once ThingSpeak catches up, its own entry is newer and the
+       * pushed one simply stops mattering; nothing needs de-duplicating.
+       */
+      const pushed = liveReadings[String(result.source.channelId)];
+      let feeds = result.feeds;
+      if (pushed?.created_at) {
+        const lastAt = feeds.length
+          ? Date.parse(feeds[feeds.length - 1].created_at)
+          : -Infinity;
+        if (Date.parse(pushed.created_at) > lastAt) feeds = [...feeds, pushed];
+      }
+
+      return buildBin({ ...result, feeds }, {
         index,
         fieldMap: settings.fieldMap,
         thresholds: settings.thresholds,
         collectionDropPercent: settings.collectionDropPercent,
         binMeta: settings.binMeta,
-      }),
-    );
+      });
+    });
 
     if (!settings.simulation?.enabled) return live;
 
@@ -160,6 +206,7 @@ export const EcoBinProvider = ({ children }) => {
   }, [
     results,
     simNow,
+    liveReadings,
     settings.fieldMap,
     settings.thresholds,
     settings.collectionDropPercent,

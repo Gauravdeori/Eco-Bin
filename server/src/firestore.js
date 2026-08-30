@@ -117,3 +117,24 @@ export const STATE_KEYS = {
   maintenance: 'ecobin.maintenance.v1',
   reports: 'ecobin.reports.v1',
 };
+
+/**
+ * Publishes the freshest reading for one channel, where the dashboard's live
+ * subscription picks it up within about a second. One document per bin,
+ * overwritten in place — this is a "now" value, not a history.
+ */
+export const writeLiveReading = async (channelId, entry) => {
+  if (!firestoreEnabled) return;
+  await request(
+    `${root()}/ecobin/${config.firebase.workspace}/live/${encodeURIComponent(channelId)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({
+        fields: {
+          json: { stringValue: JSON.stringify(entry) },
+          updatedAt: { timestampValue: new Date().toISOString() },
+        },
+      }),
+    },
+  );
+};
