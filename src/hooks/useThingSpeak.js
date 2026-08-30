@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { fetchChannelFeed, mergeFeeds } from '../services/thingspeak';
+import { fetchChannelFeed, feedSignature, mergeFeeds } from '../services/thingspeak';
 
 /**
  * Polls every configured ThingSpeak channel — fast, by fetching almost nothing.
@@ -46,6 +46,7 @@ export const useThingSpeak = ({ channels, pollSeconds, historyPoints }) => {
   /** channelId → the last good { channel, feeds, source } for that channel. */
   const cacheRef = useRef(new Map());
   const lastFullRef = useRef(0);
+  const signatureRef = useRef('');
 
   // Channels arrive as a fresh array each render; compare by value, not identity.
   const channelKey = JSON.stringify(channels);
@@ -128,7 +129,16 @@ export const useThingSpeak = ({ channels, pollSeconds, historyPoints }) => {
         if (cached) results.push(cached);
       });
 
-      setData({ results, errors });
+      // A poll that found nothing new must cost nothing: handing React the
+      // same data under a fresh identity would recompute every bin, rescore
+      // the ranking and re-render every panel, a dozen times a minute, to
+      // show the same numbers. lastSync still advances so the interface can
+      // say the link is alive.
+      const signature = feedSignature(results, errors);
+      if (signature !== signatureRef.current) {
+        signatureRef.current = signature;
+        setData({ results, errors });
+      }
       setLastSync(new Date());
 
       if (results.length === 0 && errors.length > 0) {

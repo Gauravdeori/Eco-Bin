@@ -133,3 +133,19 @@ export const mergeFeeds = (cachedFeeds, fetchedFeeds, { limit, window }) => {
     gapped: cachedFeeds.length > 0 && fetchedFeeds.length >= window && fresh.length === fetchedFeeds.length,
   };
 };
+
+/**
+ * A cheap identity for a poll result, used to skip state updates that would
+ * change nothing.
+ *
+ * Polling every few seconds only pays if a poll that found nothing costs
+ * nothing — otherwise each empty poll hands React a fresh array, every memo
+ * downstream recomputes, and the whole dashboard re-renders a dozen times a
+ * minute to display the same numbers. The last entry id per channel (plus how
+ * much history is loaded, and any errors) is enough to tell "same data" from
+ * "new data" without comparing feeds entry by entry.
+ */
+export const feedSignature = (results, errors) =>
+  results
+    .map((r) => `${r.source.channelId}:${r.feeds.at(-1)?.entry_id ?? 0}:${r.feeds.length}`)
+    .join('|') + '§' + errors.map((e) => `${e.channelId}:${e.message}`).join('|');

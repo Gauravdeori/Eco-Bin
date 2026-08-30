@@ -12,6 +12,8 @@ export default defineConfig({
         // means editing app code does not invalidate their cached chunks.
         manualChunks(id) {
           if (!id.includes('node_modules')) return
+          if (id.includes('firebase') || id.includes('grpc') || id.includes('protobuf'))
+            return 'firebase'
           if (id.includes('leaflet')) return 'maps'
           if (id.includes('recharts') || id.includes('d3-') || id.includes('victory'))
             return 'charts'

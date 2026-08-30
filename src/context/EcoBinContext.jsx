@@ -122,13 +122,16 @@ export const EcoBinProvider = ({ children }) => {
    * no real channel connected nothing else re-renders and the demo fleet would
    * sit frozen at whatever it read on load.
    */
-  const [simNow, setSimNow] = useState(() => Date.now());
+  const [simNow, setSimNow] = useState(() => Math.floor(Date.now() / 60000) * 60000);
   useEffect(() => {
     if (!settings.simulation?.enabled) return undefined;
-    // A fixed fast beat, decoupled from the telemetry poll: recomputing five
-    // sawtooths is microseconds of work, and a demo fleet that only moves
-    // every fifteen seconds reads as lag rather than as liveness.
-    const id = setInterval(() => setSimNow(Date.now()), 5000);
+    // The sawtooths only change a visible percentage point every couple of
+    // minutes, so rebuilding them faster manufactures fresh identities for
+    // identical-looking bins and drags every memo downstream with them. The
+    // clock is floored to the minute: eleven ticks in twelve hand setState the
+    // same value, React bails, and nothing recomputes. Trucks — the thing
+    // that visibly moves — run on their own one-second clock regardless.
+    const id = setInterval(() => setSimNow(Math.floor(Date.now() / 60000) * 60000), 5000);
     return () => clearInterval(id);
   }, [settings.simulation?.enabled]);
 
