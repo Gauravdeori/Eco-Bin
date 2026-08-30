@@ -156,6 +156,14 @@ export const loadSettings = () => {
        * a perfectly valid key sitting in the file.
        */
       orsKey: saved.orsKey?.trim() ? saved.orsKey : DEFAULT_SETTINGS.orsKey,
+      /**
+       * Same trap as the key above: an empty saved list would hide a channel
+       * configured in `.env`, because saved values win over defaults. A list
+       * with channels in it is the operator's own choice and is left alone;
+       * an empty one is not a configuration anybody wants, so the environment
+       * gets to fill it.
+       */
+      channels: saved.channels?.length ? saved.channels : DEFAULT_SETTINGS.channels,
       fieldMap: { ...DEFAULT_SETTINGS.fieldMap, ...(saved.fieldMap || {}) },
       thresholds: { ...DEFAULT_SETTINGS.thresholds, ...(saved.thresholds || {}) },
       autoDispatch: { ...DEFAULT_SETTINGS.autoDispatch, ...(saved.autoDispatch || {}) },
