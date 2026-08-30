@@ -24,8 +24,10 @@ const STORAGE_KEY = 'ecobin.settings.v1';
  * 2 — auto-dispatch became the default, and the n8n integration was removed.
  * 3 — the device moved to a new ThingSpeak channel, and the saved list had to
  *     stop pinning the old one.
+ * 4 — the OpenRouteService key was replaced, and a saved one had to stop
+ *     masking it.
  */
-const SCHEMA = 3;
+const SCHEMA = 4;
 
 const env = import.meta.env;
 
@@ -193,6 +195,18 @@ export const loadSettings = () => {
     const savedChannels = adoptEnvChannels ? DEFAULT_SETTINGS.channels : saved.channels;
 
     /**
+     * A key saved from the Settings page, when `.env` now carries a new one.
+     *
+     * The rule below keeps a saved key over the environment's, which is right
+     * day to day — it is what lets a key be swapped without a rebuild — but it
+     * also means replacing an exhausted or rejected key in `.env` reaches
+     * nobody who has ever typed one in. Routing would go on being refused by a
+     * key the operator had already replaced. The environment wins once, here.
+     */
+    const adoptEnvKey = savedSchema < 4 && Boolean(DEFAULT_SETTINGS.orsKey?.trim());
+    const savedOrsKey = adoptEnvKey ? DEFAULT_SETTINGS.orsKey : saved.orsKey;
+
+    /**
      * The bin's own details follow it to the new channel.
      *
      * Ward, road name, capacity and — the one that matters — the sensor
@@ -227,7 +241,7 @@ export const loadSettings = () => {
        * the real key for good. Routes quietly fell back to straight lines with
        * a perfectly valid key sitting in the file.
        */
-      orsKey: saved.orsKey?.trim() ? saved.orsKey : DEFAULT_SETTINGS.orsKey,
+      orsKey: savedOrsKey?.trim() ? savedOrsKey : DEFAULT_SETTINGS.orsKey,
       /**
        * Same trap as the key above: an empty saved list would hide a channel
        * configured in `.env`, because saved values win over defaults. A list
