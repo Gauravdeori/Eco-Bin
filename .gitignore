@@ -32,3 +32,6 @@ dist-ssr
 # Server
 server/node_modules
 server/.env
+
+# Report source — kept locally, not published
+docs/
