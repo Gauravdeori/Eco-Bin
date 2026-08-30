@@ -18,9 +18,14 @@ const STORAGE_KEY = 'ecobin.settings.v1';
  * changed default is allowed to reach a browser that has saved before, without
  * throwing away the settings the operator actually chose.
  *
+ * Each step below is guarded by its own version rather than by "older than the
+ * current one", so a later bump does not re-run an earlier migration.
+ *
  * 2 — auto-dispatch became the default, and the n8n integration was removed.
+ * 3 — the device moved to a new ThingSpeak channel, and the saved list had to
+ *     stop pinning the old one.
  */
-const SCHEMA = 2;
+const SCHEMA = 3;
 
 const env = import.meta.env;
 
@@ -157,6 +162,8 @@ export const loadSettings = () => {
     // while it existed still carries it, and it should not be handed on.
     const { n8n: _gone, ...saved } = JSON.parse(raw);
 
+    const savedSchema = saved.schema ?? 1;
+
     /**
      * Settings saved before auto-dispatch became the default.
      *
@@ -166,10 +173,46 @@ export const loadSettings = () => {
      * default would have reached nobody who had ever used the app. The
      * operator's threshold and cooldown are their own and are kept.
      */
-    const stale = (saved.schema ?? 1) < SCHEMA;
-    const savedAuto = stale
-      ? { ...saved.autoDispatch, enabled: DEFAULT_SETTINGS.autoDispatch.enabled }
-      : saved.autoDispatch;
+    const savedAuto =
+      savedSchema < 2
+        ? { ...saved.autoDispatch, enabled: DEFAULT_SETTINGS.autoDispatch.enabled }
+        : saved.autoDispatch;
+
+    /**
+     * Settings saved while the device was on its previous channel.
+     *
+     * The saved list beating `.env` is the right rule day to day — it is what
+     * lets a channel be swapped from the Settings page without a rebuild — but
+     * it also means editing `.env` to point at a new channel reaches nobody who
+     * has ever saved. The dashboard would go on polling a channel the device
+     * stopped publishing to, showing the last reading it ever got and calling
+     * it live. So the environment wins once, here, and the saved list goes back
+     * to winning immediately afterwards.
+     */
+    const adoptEnvChannels = savedSchema < 3 && DEFAULT_SETTINGS.channels.length > 0;
+    const savedChannels = adoptEnvChannels ? DEFAULT_SETTINGS.channels : saved.channels;
+
+    /**
+     * The bin's own details follow it to the new channel.
+     *
+     * Ward, road name, capacity and — the one that matters — the sensor
+     * calibration are keyed by channel id, so a channel swap would strand all
+     * of them and leave the bin reading raw sensor numbers as percentages
+     * again. Only the unambiguous case is moved: one channel replaced by one
+     * channel is the same bin with a new id behind it. Anything already saved
+     * against the new id is the operator's and is left alone.
+     */
+    const movedMeta = {};
+    if (
+      adoptEnvChannels &&
+      saved.channels?.length === 1 &&
+      DEFAULT_SETTINGS.channels.length === 1 &&
+      saved.channels[0].channelId !== DEFAULT_SETTINGS.channels[0].channelId
+    ) {
+      const from = saved.binMeta?.[saved.channels[0].channelId];
+      const to = DEFAULT_SETTINGS.channels[0].channelId;
+      if (from && !saved.binMeta?.[to]) movedMeta[to] = from;
+    }
 
     return {
       ...DEFAULT_SETTINGS,
@@ -192,7 +235,7 @@ export const loadSettings = () => {
        * an empty one is not a configuration anybody wants, so the environment
        * gets to fill it.
        */
-      channels: saved.channels?.length ? saved.channels : DEFAULT_SETTINGS.channels,
+      channels: savedChannels?.length ? savedChannels : DEFAULT_SETTINGS.channels,
       fieldMap: { ...DEFAULT_SETTINGS.fieldMap, ...(saved.fieldMap || {}) },
       thresholds: { ...DEFAULT_SETTINGS.thresholds, ...(saved.thresholds || {}) },
       autoDispatch: { ...DEFAULT_SETTINGS.autoDispatch, ...(savedAuto || {}) },
@@ -200,7 +243,7 @@ export const loadSettings = () => {
       depot: { ...DEFAULT_SETTINGS.depot, ...(saved.depot || {}) },
       fleet: { ...DEFAULT_SETTINGS.fleet, ...(saved.fleet || {}) },
       mapCenter: { ...DEFAULT_SETTINGS.mapCenter, ...(saved.mapCenter || {}) },
-      binMeta: { ...DEFAULT_SETTINGS.binMeta, ...(saved.binMeta || {}) },
+      binMeta: { ...DEFAULT_SETTINGS.binMeta, ...(saved.binMeta || {}), ...movedMeta },
     };
   } catch {
     return DEFAULT_SETTINGS;
