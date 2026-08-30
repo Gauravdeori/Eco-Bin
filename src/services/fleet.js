@@ -7,7 +7,7 @@
  * the ordering within it does.
  */
 
-import { haversineM, optimiseOrder, planRoute, tourCost } from './routing';
+import { haversineM, optimiseOrder, planRoute, tourCost } from './routing.js';
 
 /** Angle of a stop around the depot, 0 to 2π, going anticlockwise from east. */
 const bearing = ([depotLat, depotLng], [lat, lng]) => {

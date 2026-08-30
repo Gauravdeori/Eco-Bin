@@ -12,7 +12,7 @@
  * and the collection trend — rather than a flat number that never moves.
  */
 
-import { STATUS, deriveStatus, findCollections } from './telemetry';
+import { STATUS, deriveStatus, findCollections } from './telemetry.js';
 
 /** Fixed anchor so a reload shows the same fleet, not a reshuffled one. */
 const ANCHOR = Date.UTC(2026, 0, 1);
