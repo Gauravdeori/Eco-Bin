@@ -671,7 +671,7 @@ export const SettingsPage = () => {
             </Field>
             <Field
               label="Poll interval (seconds)"
-              hint="ThingSpeak's free tier updates at most every 15 seconds."
+              hint="Small delta reads run every few seconds regardless; this sets the full re-sync cadence. Above 30s it is honoured as-is."
             >
               <input
                 type="number"

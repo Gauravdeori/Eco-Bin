@@ -112,3 +112,24 @@ export const fetchAllChannels = async (channels, options = {}) => {
 
   return { results, errors };
 };
+
+/**
+ * Folds an incremental fetch into cached history.
+ *
+ * Polling fast only pays if each poll is small, so steady-state reads ask for
+ * the last few entries rather than the whole history. Entries the cache has
+ * already seen are dropped by entry id.
+ *
+ * `gapped` is the honest failure mode of that scheme: when every fetched entry
+ * is newer than the cache and the window came back full, entries may have been
+ * missed between the two — the caller should refetch the full history rather
+ * than quietly serve a hole.
+ */
+export const mergeFeeds = (cachedFeeds, fetchedFeeds, { limit, window }) => {
+  const lastId = cachedFeeds.at(-1)?.entry_id ?? 0;
+  const fresh = fetchedFeeds.filter((entry) => entry.entry_id > lastId);
+  return {
+    feeds: [...cachedFeeds, ...fresh].slice(-limit),
+    gapped: cachedFeeds.length > 0 && fetchedFeeds.length >= window && fresh.length === fetchedFeeds.length,
+  };
+};

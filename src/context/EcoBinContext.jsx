@@ -125,12 +125,12 @@ export const EcoBinProvider = ({ children }) => {
   const [simNow, setSimNow] = useState(() => Date.now());
   useEffect(() => {
     if (!settings.simulation?.enabled) return undefined;
-    const id = setInterval(
-      () => setSimNow(Date.now()),
-      Math.max(5, settings.pollSeconds) * 1000,
-    );
+    // A fixed fast beat, decoupled from the telemetry poll: recomputing five
+    // sawtooths is microseconds of work, and a demo fleet that only moves
+    // every fifteen seconds reads as lag rather than as liveness.
+    const id = setInterval(() => setSimNow(Date.now()), 5000);
     return () => clearInterval(id);
-  }, [settings.simulation?.enabled, settings.pollSeconds]);
+  }, [settings.simulation?.enabled]);
 
   /* ── raw feeds → bins ───────────────────────────────────────────────────── */
   const telemetryBins = useMemo(() => {
