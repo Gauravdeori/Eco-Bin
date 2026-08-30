@@ -355,3 +355,44 @@ input[type='range']::-moz-range-thumb {
   .truck-pin .ping { display: none; }
   .truck-pin .arrow { transition: none; }
 }
+
+/* A pickup in progress ---------------------------------------------------- */
+/* The one moment on a route worth drawing louder than everything around it:
+   the truck is standing at this bin and the crew is emptying it. Both ends of
+   the pair are marked, so the pause never reads as a stuck marker. */
+.bin-pin.collecting .halo {
+  animation-duration: 0.9s;
+}
+
+.bin-pin.collecting .dot {
+  border-color: #0f172a;
+  box-shadow:
+    0 0 0 3px rgba(15, 23, 42, 0.16),
+    0 4px 12px rgba(15, 23, 42, 0.4);
+  animation: bin-lift 0.75s ease-in-out infinite;
+}
+
+.truck-pin.lifting .disc {
+  animation: bin-lift 0.75s ease-in-out infinite;
+}
+
+.truck-pin.lifting .ping {
+  animation-duration: 1.1s;
+}
+
+@keyframes bin-lift {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-3px) scale(1.16);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bin-pin.collecting .dot,
+  .truck-pin.lifting .disc {
+    animation: none;
+  }
+}

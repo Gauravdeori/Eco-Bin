@@ -9,8 +9,14 @@
 
 import { haversineM, optimiseOrder, planRoute, tourCost } from './routing.js';
 
-/** Angle of a stop around the depot, 0 to 2π, going anticlockwise from east. */
-const bearing = ([depotLat, depotLng], [lat, lng]) => {
+/**
+ * Angle of a stop around the depot, 0 to 2π, going anticlockwise from east.
+ *
+ * Exported because the Route Planner shows which wedge of the city each truck
+ * was handed, and that explanation has to be the number the split actually used
+ * rather than a second implementation of it that is free to drift.
+ */
+export const bearingFromDepot = ([depotLat, depotLng], [lat, lng]) => {
   const angle = Math.atan2(lat - depotLat, lng - depotLng);
   return angle < 0 ? angle + 2 * Math.PI : angle;
 };
@@ -86,7 +92,7 @@ export const sweepPartition = (stops, trucks, depot) => {
   }
 
   const ordered = [...stops].sort(
-    (a, b) => bearing(depot, a.point) - bearing(depot, b.point),
+    (a, b) => bearingFromDepot(depot, a.point) - bearingFromDepot(depot, b.point),
   );
 
   let best = null;
@@ -182,6 +188,70 @@ export const positionAlong = (path, fraction) => {
 };
 
 /**
+ * How long a crew stands at a bin before moving on.
+ *
+ * A truck that drives through its stops without stopping is not collecting
+ * anything, and on the map it reads as a vehicle sailing straight past every
+ * bin on its route. A minute at the kerb is a short but honest pickup, and it
+ * is what makes an arrival something an operator can actually watch happen.
+ *
+ * It is journey time like every other figure here, so sped-up playback shortens
+ * it in exactly the same proportion as the driving.
+ */
+export const STOP_DWELL_S = 60;
+
+/**
+ * Where a run has got to, `elapsedS` journey-seconds after leaving the depot.
+ *
+ * Progress cannot be elapsed-over-duration any more: the router's duration is
+ * driving alone, and the truck now spends time standing at each bin. So the
+ * journey is walked leg by leg — drive to the stop, stand there for the pickup,
+ * drive on — and whatever is left over lands the truck partway along a leg.
+ *
+ * `done` counts the pickups that have actually finished rather than the stops
+ * driven past, which is what makes the bin empty when the crew is done with it
+ * instead of the moment the truck pulls up.
+ */
+export const runProgress = (run, elapsedS, dwellS = STOP_DWELL_S) => {
+  const fractions = run.fractions ?? [];
+  const driveS = run.durationS > 0 ? run.durationS : 0;
+  const totalS = driveS + fractions.length * dwellS;
+
+  let remaining = Math.max(0, elapsedS);
+  let from = 0;
+
+  for (let index = 0; index < fractions.length; index += 1) {
+    const leg = Math.max(0, fractions[index] - from) * driveS;
+
+    if (remaining < leg) {
+      // Still driving towards this stop.
+      return {
+        progress: driveS > 0 ? from + remaining / driveS : fractions[index],
+        collecting: -1,
+        done: index,
+        totalS,
+      };
+    }
+    remaining -= leg;
+
+    if (remaining < dwellS) {
+      // Parked at the bin with the crew working.
+      return { progress: fractions[index], collecting: index, done: index, totalS };
+    }
+    remaining -= dwellS;
+    from = fractions[index];
+  }
+
+  // Every bin emptied; this is the run home.
+  return {
+    progress: driveS > 0 ? Math.min(1, from + remaining / driveS) : 1,
+    collecting: -1,
+    done: fractions.length,
+    totalS,
+  };
+};
+
+/**
  * Plans one optimised run per truck.
  *
  * Routes are fetched one at a time rather than in parallel: OpenRouteService
@@ -203,6 +273,14 @@ export const planFleetRuns = async (groups, { apiKey, signal, depot, startedAt }
     const path = decimatePath(plan.path);
 
     runs.push({
+      /**
+       * Identity for this run, fixed when it is planned.
+       *
+       * `startedAt` cannot serve: pausing the fleet moves it, so anything that
+       * remembers what it has already seen about a run — a log, a notification
+       * — would see the same run as a new one every time playback resumed.
+       */
+      runId: `${group.truck.id}-${startedAt}`,
       truckId: group.truck.id,
       driver: group.truck.driver,
       stops: ordered.map((stop) => stop.id),

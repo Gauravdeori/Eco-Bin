@@ -9,6 +9,7 @@ import { DashboardPage } from './components/pages/DashboardPage';
 import { BinsPage } from './components/pages/BinsPage';
 import { MapPage } from './components/pages/MapPage';
 import { CollectionPage } from './components/pages/CollectionPage';
+import { RoutesPage } from './components/pages/RoutesPage';
 import { TrucksPage } from './components/pages/TrucksPage';
 import { ReportsPage } from './components/pages/ReportsPage';
 import { SegregationPage } from './components/pages/SegregationPage';
@@ -19,6 +20,7 @@ const PAGES = {
   dashboard: DashboardPage,
   bins: BinsPage,
   map: MapPage,
+  routes: RoutesPage,
   collection: CollectionPage,
   trucks: TrucksPage,
   reports: ReportsPage,

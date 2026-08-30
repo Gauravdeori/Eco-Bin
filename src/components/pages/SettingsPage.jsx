@@ -128,6 +128,7 @@ export const SettingsPage = () => {
     settings,
     updateSettings,
     resetSettings,
+    setSimSpeed,
     bins,
     trucks,
     linkErrors,
@@ -471,12 +472,13 @@ export const SettingsPage = () => {
                 max="120"
                 step="1"
                 value={settings.simulation?.speed ?? 20}
-                onChange={(event) =>
-                  updateSettings((current) => ({
-                    ...current,
-                    simulation: { ...current.simulation, speed: Number(event.target.value) },
-                  }))
-                }
+                /*
+                 * Through the fleet rather than straight into settings: speed
+                 * divides elapsed time into journey time, so writing it alone
+                 * teleports every truck that is out. setSimSpeed re-anchors the
+                 * runs first, leaving them exactly where they are.
+                 */
+                onChange={(event) => setSimSpeed(Number(event.target.value))}
                 className="w-full text-emerald-600"
               />
             </Field>

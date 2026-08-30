@@ -11,7 +11,13 @@ import { loadSettings, saveSettings, DEFAULT_SETTINGS } from '../config/settings
 import { useThingSpeak } from '../hooks/useThingSpeak';
 import { useSharedState } from '../hooks/useSharedState';
 import { simulatedBins } from '../lib/simulation';
-import { headingDeg, planFleetRuns, positionAlong, sweepPartition } from '../services/fleet';
+import {
+  headingDeg,
+  planFleetRuns,
+  positionAlong,
+  runProgress,
+  sweepPartition,
+} from '../services/fleet';
 import { haversineM } from '../services/routing';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { LIVE_PATH, firebaseConfigured, firestore } from '../services/firebase';
@@ -511,6 +517,95 @@ export const EcoBinProvider = ({ children }) => {
     [bins],
   );
 
+  /* -- playback -------------------------------------------------------------- */
+
+  /**
+   * The clock the fleet moves against. Ticks only while something is driving,
+   * and stops dead while the simulation is held.
+   */
+  const [clock, setClock] = useState(() => Date.now());
+  const [simPaused, setSimPaused] = useState(false);
+  /** When the hold started, so resuming knows how much time to give back. */
+  const heldSince = useRef(null);
+  const anyRuns = Object.keys(runs).length > 0;
+
+  useEffect(() => {
+    if (!anyRuns || simPaused) return undefined;
+    const id = setInterval(() => setClock(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [anyRuns, simPaused]);
+
+  /**
+   * Holds the fleet where it stands.
+   *
+   * Progress is measured from each run's start against the wall clock, so
+   * stopping the ticks alone would not pause anything — the trucks would simply
+   * jump to where they would have been the moment it resumed. Freezing the
+   * clock stops the movement; resuming pushes every run's start time forward by
+   * exactly how long the hold lasted, so each truck carries on from where it
+   * stopped rather than from where the calendar says it should be.
+   */
+  const pauseSim = useCallback(() => {
+    if (heldSince.current !== null) return;
+    heldSince.current = Date.now();
+    setClock(heldSince.current);
+    setSimPaused(true);
+  }, []);
+
+  const resumeSim = useCallback(() => {
+    const from = heldSince.current;
+    if (from === null) return;
+    const held = Date.now() - from;
+    heldSince.current = null;
+    setRuns((current) => {
+      const next = {};
+      Object.entries(current).forEach(([truckId, run]) => {
+        next[truckId] = { ...run, startedAt: run.startedAt + held };
+      });
+      return next;
+    });
+    setClock(Date.now());
+    setSimPaused(false);
+  }, [setRuns]);
+
+  const toggleSim = useCallback(() => {
+    if (heldSince.current === null) pauseSim();
+    else resumeSim();
+  }, [pauseSim, resumeSim]);
+
+  /**
+   * Changes how fast playback runs without moving the trucks.
+   *
+   * Speed divides elapsed wall-clock time into journey time, so changing it
+   * alone would teleport every truck: at twice the speed, the same seconds
+   * since departure become twice the journey. Each run's start is re-anchored
+   * so the distance it has covered comes out unchanged, and only what happens
+   * from here on is faster.
+   */
+  const setSimSpeed = useCallback(
+    (speed) => {
+      const next = Math.max(1, Math.min(120, Math.round(speed) || 1));
+      const previous = Math.max(1, settings.simulation?.speed ?? 20);
+      if (next === previous) return;
+
+      const now = heldSince.current ?? Date.now();
+      setRuns((current) => {
+        const out = {};
+        Object.entries(current).forEach(([truckId, run]) => {
+          const elapsedS = ((now - run.startedAt) / 1000) * previous;
+          out[truckId] = { ...run, startedAt: now - (elapsedS / next) * 1000 };
+        });
+        return out;
+      });
+
+      updateSettings((currentSettings) => ({
+        ...currentSettings,
+        simulation: { ...currentSettings.simulation, speed: next },
+      }));
+    },
+    [settings.simulation?.speed, setRuns, updateSettings],
+  );
+
   /* -- collection runs ----------------------------------------------------- */
 
   /** Where runs start and end. The map centre stands in until a depot is set. */
@@ -523,14 +618,31 @@ export const EcoBinProvider = ({ children }) => {
   const [planning, setPlanning] = useState(false);
 
   /**
-   * Splits the bins that need collecting across the free trucks and plans an
-   * optimised run for each. The split happens before any routing, because which
-   * truck takes which bin decides far more of the total distance than the order
-   * of stops within one run does.
+   * Works out the runs without committing to them.
+   *
+   * The split happens before any routing, because which truck takes which bin
+   * decides far more of the total distance than the order of stops within one
+   * run does.
+   *
+   * Nothing here writes state. That is what lets the Route Planner show the
+   * plan — the split, the driving order, the distance it saves — and let an
+   * operator look at it before a single truck is sent anywhere. A preview that
+   * is never dispatched leaves no trace behind it.
    */
-  const planRuns = useCallback(
-    async ({ scope = 'DUE' } = {}) => {
-      const positioned = bins.filter((bin) => bin.lat !== null && bin.lng !== null);
+  const previewRuns = useCallback(
+    async ({ scope = 'DUE', signal } = {}) => {
+      /*
+       * A bin someone is already on their way to is not a stop for this round.
+       *
+       * Urgency says nothing about whether a bin is already spoken for, so
+       * without this a second truck is routed to a bin the first one is halfway
+       * to — and dispatching moves the assignment to the newcomer while the
+       * original carries on driving to a stop that is no longer its own. It is
+       * the same rule hands-off dispatch applies before sending anyone.
+       */
+      const positioned = bins.filter(
+        (bin) => bin.lat !== null && bin.lng !== null && !bin.assignment,
+      );
       const candidates =
         scope === 'ALL'
           ? positioned
@@ -559,68 +671,102 @@ export const EcoBinProvider = ({ children }) => {
         const { groups, unassigned } = sweepPartition(stops, available, depotPoint);
         const planned = await planFleetRuns(groups, {
           apiKey: settings.orsKey,
+          signal,
           depot: depotPoint,
           startedAt: Date.now(),
         });
-
-        setRuns((current) => {
-          const next = { ...current };
-          planned.forEach((run) => {
-            next[run.truckId] = run;
-          });
-          return next;
-        });
-
-        setTrucks((fleet) =>
-          fleet.map((truck) =>
-            planned.some((run) => run.truckId === truck.id)
-              ? { ...truck, status: 'ON_ROUTE' }
-              : truck,
-          ),
-        );
-
-        setAssignments((current) => {
-          const next = { ...current };
-          planned.forEach((run) => {
-            run.stops.forEach((channelId) => {
-              next[channelId] = {
-                truckId: run.truckId,
-                driver: run.driver,
-                at: new Date().toISOString(),
-                auto: true,
-              };
-            });
-          });
-          return next;
-        });
-
-        planned.forEach((run) => {
-          pushAlert({
-            kind: 'DISPATCH',
-            title: `${run.truckId} routed through ${run.stops.length} bin${run.stops.length === 1 ? '' : 's'}`,
-            detail: `${(run.distanceM / 1000).toFixed(1)} km \u00b7 ${run.stopNames.join(' \u2192 ')}`,
-          });
-        });
-
-        return { ok: true, runs: planned, unassigned };
+        return { ok: true, runs: planned, unassigned, candidates, depot: depotPoint };
       } catch (error) {
+        if (error?.name === 'AbortError') return { ok: false, reason: 'aborted' };
         return { ok: false, reason: 'route-failed', message: error.message };
       } finally {
         setPlanning(false);
       }
     },
-    [
-      bins,
-      trucks,
-      runs,
-      depotPoint,
-      priorityByChannel,
-      settings.orsKey,
-      setRuns,
-      setTrucks,
-      setAssignments,
-      pushAlert,
-    ],
+    [bins, trucks, runs, depotPoint, priorityByChannel, settings.orsKey],
+  );
+
+  /**
+   * Puts planned runs on the road.
+   *
+   * The clock starts here rather than when the route was worked out: a plan an
+   * operator studied for two minutes before dispatching would otherwise begin
+   * two minutes in, with its first stops already behind the truck.
+   *
+   * A truck that picked up a run since the plan was made keeps the one it is
+   * driving. Auto-dispatch can land between a preview and its dispatch, and
+   * overwriting there would strand whatever was already under way.
+   */
+  const commitRuns = useCallback(
+    (planned) => {
+      const fresh = (planned ?? []).filter((run) => !runsRef.current[run.truckId]);
+      if (fresh.length === 0) return { ok: false, reason: 'no-runs' };
+
+      /*
+       * Released before anything is written, not after. Resuming rebases every
+       * run in flight by the length of the hold, and these updates are batched
+       * in call order — so resuming last would push the run being dispatched
+       * back by a pause it was never part of, and leave the truck sitting at
+       * the depot for exactly as long as the fleet had been held.
+       */
+      resumeSim();
+
+      const startedAt = Date.now();
+      const live = fresh.map((run) => ({ ...run, startedAt, collected: [] }));
+
+      setRuns((current) => {
+        const next = { ...current };
+        live.forEach((run) => {
+          next[run.truckId] = run;
+        });
+        return next;
+      });
+
+      setTrucks((fleet) =>
+        fleet.map((truck) =>
+          live.some((run) => run.truckId === truck.id)
+            ? { ...truck, status: 'ON_ROUTE' }
+            : truck,
+        ),
+      );
+
+      setAssignments((current) => {
+        const next = { ...current };
+        live.forEach((run) => {
+          run.stops.forEach((channelId) => {
+            next[channelId] = {
+              truckId: run.truckId,
+              driver: run.driver,
+              at: new Date().toISOString(),
+              auto: true,
+            };
+          });
+        });
+        return next;
+      });
+
+      live.forEach((run) => {
+        pushAlert({
+          kind: 'DISPATCH',
+          title: `${run.truckId} routed through ${run.stops.length} bin${run.stops.length === 1 ? '' : 's'}`,
+          detail: `${(run.distanceM / 1000).toFixed(1)} km · ${run.stopNames.join(' → ')}`,
+        });
+      });
+
+      return { ok: true, runs: live };
+    },
+    [setRuns, setTrucks, setAssignments, pushAlert, resumeSim],
+  );
+
+  /** Plans the round and sends it out in one step. */
+  const planRuns = useCallback(
+    async (options) => {
+      const plan = await previewRuns(options);
+      if (!plan.ok) return plan;
+      commitRuns(plan.runs);
+      return plan;
+    },
+    [previewRuns, commitRuns],
   );
 
   /** Abandons a run and frees its truck, leaving the bins for the next plan. */
@@ -647,6 +793,11 @@ export const EcoBinProvider = ({ children }) => {
     },
     [runs, setRuns, setTrucks, setAssignments],
   );
+
+  /** Calls the whole round off and parks every truck. */
+  const cancelAllRuns = useCallback(() => {
+    Object.keys(runsRef.current).forEach((truckId) => cancelRun(truckId));
+  }, [cancelRun]);
 
   /**
    * Any truck holding assignments but not yet driving gets a run planned.
@@ -758,16 +909,6 @@ export const EcoBinProvider = ({ children }) => {
 
   /* -- driving the runs ---------------------------------------------------- */
 
-  /** Ticks only while something is actually moving. */
-  const [clock, setClock] = useState(() => Date.now());
-  const anyRuns = Object.keys(runs).length > 0;
-
-  useEffect(() => {
-    if (!anyRuns) return undefined;
-    const id = setInterval(() => setClock(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, [anyRuns]);
-
   /**
    * Where each truck is right now.
    *
@@ -779,7 +920,8 @@ export const EcoBinProvider = ({ children }) => {
     const speed = Math.max(1, settings.simulation?.speed ?? 20);
     return Object.values(runs).map((run) => {
       const elapsedS = ((clock - run.startedAt) / 1000) * speed;
-      const progress = run.durationS > 0 ? Math.min(1, elapsedS / run.durationS) : 1;
+      // Driving and standing at bins, walked leg by leg — see runProgress.
+      const { progress, collecting, done, totalS } = runProgress(run, elapsedS);
       const position = positionAlong(run.path, progress);
       // Sample a little further along to work out which way it is pointing.
       const ahead = positionAlong(run.path, Math.min(1, progress + 0.008));
@@ -842,9 +984,17 @@ export const EcoBinProvider = ({ children }) => {
          * once. The driver's remaining journey is the honest number and the one
          * anybody tracking a vehicle expects to see.
          */
-        remainingS: Math.max(0, run.durationS - elapsedS),
-        stopsDone: run.fractions.filter((fraction) => progress >= fraction).length,
-        finished: progress >= 1,
+        remainingS: Math.max(0, totalS - elapsedS),
+        /** Journey seconds done and in total, so a caller can time each stop. */
+        elapsedS: Math.min(elapsedS, totalS),
+        totalS,
+        /** Pickups finished, not stops driven past. */
+        stopsDone: done,
+        /** Index of the stop the crew is working right now, or -1. */
+        collectingIndex: collecting,
+        collecting: collecting >= 0,
+        collectingChannelId: collecting >= 0 ? run.stops[collecting] : null,
+        finished: elapsedS >= totalS,
       };
     });
   }, [runs, clock, priorityByChannel, settings.simulation?.speed, settings.thresholds]);
@@ -857,9 +1007,11 @@ export const EcoBinProvider = ({ children }) => {
     const finished = [];
 
     fleetRuns.forEach((run) => {
-      run.fractions.forEach((fraction, index) => {
-        const channelId = run.stops[index];
-        if (run.progress >= fraction && !run.collected.includes(channelId)) {
+      // Emptied means the crew has finished with it, not that the truck has
+      // reached it — otherwise a bin reads as collected the instant a truck
+      // pulls up, while the pickup is still visibly happening on the map.
+      run.stops.slice(0, run.stopsDone).forEach((channelId) => {
+        if (!run.collected.includes(channelId)) {
           arrived.push({ truckId: run.truckId, channelId });
         }
       });
@@ -1348,8 +1500,17 @@ export const EcoBinProvider = ({ children }) => {
     priorityByChannel,
     fleetRuns,
     planRuns,
+    previewRuns,
+    commitRuns,
     cancelRun,
+    cancelAllRuns,
     planning,
+    simPaused,
+    pauseSim,
+    resumeSim,
+    toggleSim,
+    setSimSpeed,
+    simSpeed: Math.max(1, settings.simulation?.speed ?? 20),
     depotPoint,
     stats,
     analytics,
