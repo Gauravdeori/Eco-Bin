@@ -12,7 +12,7 @@ import { useThingSpeak } from '../hooks/useThingSpeak';
 import { useSharedState } from '../hooks/useSharedState';
 import { simulatedBins } from '../lib/simulation';
 import { headingDeg, planFleetRuns, positionAlong, sweepPartition } from '../services/fleet';
-import { onSnapshot } from 'firebase/firestore';
+import { collection, onSnapshot } from 'firebase/firestore';
 import { LIVE_PATH, firebaseConfigured, firestore } from '../services/firebase';
 import {
   STATUS,
