@@ -232,6 +232,23 @@ export const buildBin = (
 };
 
 /**
+ * A drop smaller than this is sensor noise, not an emptied bin.
+ * Big enough to ignore jitter, far below the quarter-drop that marks a pickup.
+ */
+const HOLD_TOLERANCE = 5;
+
+/** What the bin was reading when its truck was sent — the job the truck took. */
+const atDispatch = (bin, assignment) => {
+  const sentAt = assignment?.at ? new Date(assignment.at).getTime() : NaN;
+  if (Number.isNaN(sentAt)) return null;
+
+  for (let i = bin.readings.length - 1; i >= 0; i -= 1) {
+    if (bin.readings[i].at.getTime() <= sentAt) return bin.readings[i];
+  }
+  return null;
+};
+
+/**
  * Operator actions (dispatch, maintenance flags) and open citizen reports sit
  * on top of the telemetry status without overwriting the sensor truth.
  */
@@ -246,7 +263,58 @@ export const applyOverlays = (bin, { assignments, maintenance, reports }) => {
   else if (assignment) status = STATUS.ASSIGNED;
   else if (openReport && status !== STATUS.FULL) status = STATUS.REPORTED;
 
-  return { ...bin, status, assignment: assignment ?? null, openReport: openReport ?? null };
+  /**
+   * A bin with a truck on the way keeps showing the job that truck was sent
+   * for, until the truck gets there.
+   *
+   * Sensors drop to zero for reasons that have nothing to do with a collection:
+   * somebody lifts the bag out by hand, the ultrasonic head gets covered, the
+   * load cell is knocked. The truck is still ten minutes away and the bin still
+   * needs emptying, but the map would show it as done — a driver looking at the
+   * screen sees no reason to make the stop.
+   *
+   * So while a bin is assigned, a reading that falls below what it read at
+   * dispatch is held. A bin that keeps filling reports the higher live number,
+   * because that is real and worth knowing before the truck arrives.
+   */
+  let fill = bin.fill;
+  let weight = bin.weight;
+  let awaitingCollection = false;
+
+  const sent = assignment ? atDispatch(bin, assignment) : null;
+  if (sent) {
+    /**
+     * One decision covers both readings, because they describe one event.
+     * Fill leads where the bin has a fill sensor, since that is what a
+     * collection is judged on everywhere else; weight only decides on its own
+     * when there is no fill reading to go by. Deciding them separately let a
+     * couple of kilos of wobble flag a bin as held while its fill was fine.
+     */
+    if (sent.fill !== null && bin.fill !== null) {
+      awaitingCollection = bin.fill <= sent.fill - HOLD_TOLERANCE;
+    } else if (sent.weight !== null && bin.weight !== null) {
+      // Proportional, so a small bin is not judged by a large bin's margin.
+      awaitingCollection = bin.weight <= sent.weight * 0.9;
+    } else {
+      // The sensor stopped reporting entirely while a truck was on its way.
+      awaitingCollection = bin.fill === null && sent.fill !== null;
+    }
+
+    if (awaitingCollection) {
+      if (sent.fill !== null) fill = sent.fill;
+      if (sent.weight !== null) weight = sent.weight;
+    }
+  }
+
+  return {
+    ...bin,
+    fill,
+    weight,
+    awaitingCollection,
+    status,
+    assignment: assignment ?? null,
+    openReport: openReport ?? null,
+  };
 };
 
 /**

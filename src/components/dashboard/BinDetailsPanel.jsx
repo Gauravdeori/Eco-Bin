@@ -173,7 +173,13 @@ export const BinDetailsPanel = () => {
             {bin.capacityKg ? `Capacity: ${bin.capacityKg} kg` : 'Capacity not set'}
           </p>
           {/* Say when this is the last real load rather than a live reading. */}
-          {bin.weightHeld && (
+          {bin.awaitingCollection && (
+            <p className="mt-1 flex items-start gap-1 text-[10px] leading-snug text-amber-300">
+              <AlertTriangle className="mt-px h-3 w-3 shrink-0" />
+              Sensor dropped before the truck arrived — showing what it was dispatched for
+            </p>
+          )}
+          {bin.weightHeld && !bin.awaitingCollection && (
             <p className="mt-1 flex items-start gap-1 text-[10px] leading-snug text-amber-300">
               <AlertTriangle className="mt-px h-3 w-3 shrink-0" />
               Load cell reads 0 — holding the last load until collection

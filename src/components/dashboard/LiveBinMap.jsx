@@ -710,6 +710,14 @@ export const LiveBinMap = ({ height = 'h-[340px]', scrollZoom = false }) => {
                     <div className="mt-2 flex items-center gap-3 text-[11px] text-slate-600">
                       <span>
                         Fill <b className="tabular">{bin.fill === null ? '—' : `${bin.fill}%`}</b>
+                        {bin.awaitingCollection && (
+                          <span
+                            className="ml-1 rounded bg-amber-100 px-1 text-[9px] font-bold text-amber-700"
+                            title="The sensor dropped before the truck arrived — showing what it was dispatched for"
+                          >
+                            held
+                          </span>
+                        )}
                       </span>
                       <span>
                         Weight{' '}

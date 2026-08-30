@@ -97,6 +97,9 @@ export const EcoBinProvider = ({ children }) => {
   const binsRef = useRef([]);
   const assignTruckRef = useRef(() => ({ ok: false }));
   const handledCommandsRef = useRef([]);
+  /** Read by the collection check, which must not depend on them directly. */
+  const runsRef = useRef({});
+  const assignmentsRef = useRef({});
 
   /* ── UI state ───────────────────────────────────────────────────────────── */
   const [selectedChannelId, setSelectedChannelId] = useState(null);
@@ -244,7 +247,25 @@ export const EcoBinProvider = ({ children }) => {
 
       // A collection newer than the one we last saw: the bin was emptied.
       const collectedAt = bin.lastCollected?.getTime() ?? null;
-      if (collectedAt !== null && collectedAt !== before.lastCollectedAt) {
+
+      /**
+       * A fill drop while the assigned truck is still on its way was not that
+       * truck's doing.
+       *
+       * Somebody lifting the bag out by hand, or a sensor head getting covered,
+       * looks exactly like a pickup to the fill reading. Believing it would
+       * close the job, free the truck and clear the bin off the board while a
+       * driver is ten minutes out and still needs to make the stop. So the
+       * collection is only registered once the truck has actually reached it;
+       * until then the run stands and the bin keeps showing what it was
+       * dispatched for.
+       */
+      const pending = assignmentsRef.current[bin.channelId];
+      const run = pending ? runsRef.current[pending.truckId] : null;
+      const stillOnItsWay =
+        Boolean(pending) && (!run || !(run.collected ?? []).includes(bin.channelId));
+
+      if (collectedAt !== null && collectedAt !== before.lastCollectedAt && !stillOnItsWay) {
         pushAlert({
           kind: 'COLLECTED',
           title: `${bin.id} collected`,
@@ -1014,6 +1035,8 @@ export const EcoBinProvider = ({ children }) => {
     binsRef.current = bins;
     assignTruckRef.current = assignTruck;
     handledCommandsRef.current = handledCommands;
+    runsRef.current = runs;
+    assignmentsRef.current = assignments;
   });
 
   /**
