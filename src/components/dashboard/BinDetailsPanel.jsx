@@ -100,6 +100,9 @@ export const BinDetailsPanel = () => {
 
   const meta = STATUS_META[bin.status];
   const history = buildHistory(bin);
+  // No coordinates means no route, and a truck with no route never arrives and
+  // never comes back — so the dispatch is refused here rather than stranding it.
+  const unpositioned = bin.lat === null || bin.lng === null;
   const capacityPct =
     bin.capacityKg && bin.weight !== null
       ? Math.min(100, Math.round((bin.weight / bin.capacityKg) * 100))
@@ -275,15 +278,21 @@ export const BinDetailsPanel = () => {
           <button
             type="button"
             onClick={() => assignTruck(bin.channelId)}
-            disabled={trucks.length === 0}
+            disabled={trucks.length === 0 || unpositioned}
             title={
-              trucks.length === 0
-                ? 'Add a truck on the Trucks page first'
-                : 'Sends a truck now, without waiting for auto-dispatch'
+              unpositioned
+                ? 'This bin has no coordinates, so no route can be planned. Set them in Settings.'
+                : trucks.length === 0
+                  ? 'Add a truck on the Trucks page first'
+                  : 'Sends a truck now, without waiting for auto-dispatch'
             }
             className="flex-1 rounded-xl bg-brand-500 px-4 py-3 text-sm font-bold text-white transition-colors hover:bg-brand-400 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
           >
-            {trucks.length === 0 ? 'Add a truck to dispatch' : 'Dispatch a Truck'}
+            {unpositioned
+              ? 'Set a location to dispatch'
+              : trucks.length === 0
+                ? 'Add a truck to dispatch'
+                : 'Dispatch a Truck'}
           </button>
         )}
         <button

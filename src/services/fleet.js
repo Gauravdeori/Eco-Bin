@@ -216,6 +216,7 @@ export const planFleetRuns = async (groups, { apiKey, signal, depot, startedAt }
       unorderedDistanceM: plan.unorderedDistanceM,
       followsRoads: plan.followsRoads,
       source: plan.source,
+      keyError: plan.keyError ?? null,
       depot,
       startedAt,
       collected: [],

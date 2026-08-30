@@ -26,18 +26,30 @@ export class RoutingError extends Error {
 }
 
 const explain = async (response) => {
-  if (response.status === 403 || response.status === 401) {
-    return 'OpenRouteService rejected the API key. Check it in Settings.';
+  // The body is read first because ORS answers an exhausted endpoint quota with
+  // a bare 403 and {"error":"Quota exceeded"} — indistinguishable from a bad
+  // key if you only look at the status, and a very different thing to fix.
+  let detail = null;
+  try {
+    const body = await response.json();
+    detail =
+      typeof body?.error === 'string' ? body.error : (body?.error?.message ?? null);
+  } catch {
+    /* no JSON body — the status is all there is */
+  }
+
+  if (response.status === 401) {
+    return `OpenRouteService rejected the API key${detail ? ` (${detail})` : ''}. Check it in Settings.`;
+  }
+  if (response.status === 403) {
+    return detail
+      ? `OpenRouteService refused the request: ${detail}.`
+      : 'OpenRouteService refused the API key. Check it in Settings.';
   }
   if (response.status === 429) {
     return 'OpenRouteService daily quota reached. It resets at midnight UTC.';
   }
-  try {
-    const body = await response.json();
-    return body?.error?.message ?? `OpenRouteService returned ${response.status}.`;
-  } catch {
-    return `OpenRouteService returned ${response.status}.`;
-  }
+  return detail ?? `OpenRouteService returned ${response.status}.`;
 };
 
 /** Address search. Returns [{ label, lat, lng }]. */
@@ -215,6 +227,9 @@ const FALLBACK_KMH = 25;
  * says so, so the UI can admit the ordering is approximate.
  */
 export const costMatrix = async (locations, { apiKey, signal } = {}) => {
+  /** Why the operator's key went unused, when it did. Reported, never fatal. */
+  let keyError = null;
+
   if (apiKey) {
     const response = await fetch(`${ORS}/v2/matrix/driving-car`, {
       method: 'POST',
@@ -233,10 +248,21 @@ export const costMatrix = async (locations, { apiKey, signal } = {}) => {
     if (response.ok) {
       const body = await response.json();
       if (Array.isArray(body.durations) && Array.isArray(body.distances)) {
-        return { durations: body.durations, distances: body.distances, source: 'road' };
+        // keyError stays null here by definition: this is the key working.
+        return { durations: body.durations, distances: body.distances, source: 'road', keyError: null };
       }
-    } else if (response.status === 403 || response.status === 401) {
-      throw new RoutingError(await explain(response));
+    } else if (response.status === 401 || response.status === 403 || response.status === 429) {
+      /*
+       * A refused key used to throw here, and that threw away the whole plan:
+       * no route, so no run, so the truck the plan was for sat marked ON_ROUTE
+       * with nothing driving it and never came back to the fleet. One expired
+       * matrix quota was enough to stop the dashboard dispatching at all.
+       *
+       * It is worth saying out loud — the operator's key is not being used —
+       * but it is not worth the route. OSRM answers the same question without
+       * a key, so the reason is carried out with the matrix instead.
+       */
+      keyError = await explain(response);
     }
     // Any other failure is not worth losing the route over — fall through.
   }
@@ -245,14 +271,14 @@ export const costMatrix = async (locations, { apiKey, signal } = {}) => {
   // without one, and they order the stops far better than crow-flies distance.
   try {
     const table = await osrmTable(locations, { signal });
-    return { ...table, source: 'road' };
+    return { ...table, source: 'road', keyError };
   } catch (error) {
     if (error?.name === 'AbortError') throw error;
   }
 
   const distances = locations.map((from) => locations.map((to) => haversineM(from, to)));
   const durations = distances.map((row) => row.map((m) => (m / 1000) * (3600 / FALLBACK_KMH)));
-  return { durations, distances, source: 'straight-line' };
+  return { durations, distances, source: 'straight-line', keyError };
 };
 
 /** Total cost of visiting `order`, closing back to the start on a round trip. */
@@ -366,7 +392,7 @@ export const planRoute = async (stops, { apiKey, signal, depot = null } = {}) =>
     throw new RoutingError(`Routes are limited to ${MAX_STOPS} stops.`);
   }
 
-  const { durations, distances, source } = await costMatrix(locations, { apiKey, signal });
+  const { durations, distances, source, keyError } = await costMatrix(locations, { apiKey, signal });
   const roundTrip = Boolean(depot);
 
   const order = optimiseOrder(durations, { roundTrip });
@@ -407,6 +433,8 @@ export const planRoute = async (stops, { apiKey, signal, depot = null } = {}) =>
     unorderedDistanceM: asGivenCost.distanceM,
     unorderedDurationS: asGivenCost.durationS,
     source,
+    /** Set when the operator's key was refused and a keyless router stood in. */
+    keyError: keyError ?? null,
     roundTrip,
     depot,
   };

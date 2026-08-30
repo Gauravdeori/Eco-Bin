@@ -644,6 +644,8 @@ export const EcoBinProvider = ({ children }) => {
    * burning the request quota that the retries need.
    */
   const routeFailedAt = useRef(new Map());
+  /** Key-refused messages already reported, so one bad key is not one alert per run. */
+  const keyErrorSaid = useRef(new Set());
 
   useEffect(() => {
     const pending = new Map();
@@ -703,6 +705,19 @@ export const EcoBinProvider = ({ children }) => {
               : truck,
           ),
         );
+
+        // The route still got planned, but not with the operator's own key.
+        // Worth knowing — a key silently doing nothing is how a quota stays
+        // exhausted for weeks — and worth saying only once.
+        const refused = planned.find((run) => run.keyError);
+        if (refused && !keyErrorSaid.current.has(refused.keyError)) {
+          keyErrorSaid.current.add(refused.keyError);
+          pushAlert({
+            kind: 'OFFLINE',
+            title: 'Routes are being planned without your API key',
+            detail: refused.keyError,
+          });
+        }
       } catch {
         // A route that cannot be fetched leaves the assignment standing. The
         // bin is still assigned and the operator still sees it; only the
@@ -716,7 +731,7 @@ export const EcoBinProvider = ({ children }) => {
     return () => {
       cancelled = true;
     };
-  }, [assignments, runs, bins, trucks, depotPoint, settings.orsKey, setRuns, setTrucks]);
+  }, [assignments, runs, bins, trucks, depotPoint, settings.orsKey, setRuns, setTrucks, pushAlert]);
 
   /* -- driving the runs ---------------------------------------------------- */
 
@@ -896,6 +911,76 @@ export const EcoBinProvider = ({ children }) => {
     }
   }, [fleetRuns, setRuns, setTrucks, setAssignments, setSimCollections, pushAlert]);
 
+  /**
+   * Gives back a truck that is committed to a job it can never finish.
+   *
+   * A run is the only thing that moves a truck on and hands it back at the end,
+   * and a run needs coordinates. A bin without them takes a truck out of the
+   * fleet permanently: marked ON_ROUTE, no route to drive, assignment standing
+   * forever. One such bin quietly ate the fleet a truck at a time until nothing
+   * was left to dispatch, which looked exactly like auto-dispatch having
+   * stopped working.
+   *
+   * Dispatch no longer sends anyone there, so this is for assignments made
+   * before that and for any that arrive from a shared workspace. It is also
+   * why the release cannot loop: nothing re-creates what it clears.
+   */
+  useEffect(() => {
+    // Before the first telemetry lands every bin is "missing", which is not the
+    // same as unroutable. Judge nothing until there is something to judge.
+    if (bins.length === 0) return;
+
+    const stranded = Object.entries(assignments).filter(([channelId, assignment]) => {
+      if (!assignment?.truckId || runs[assignment.truckId]) return false;
+      if (routing.current.has(assignment.truckId)) return false; // being planned now
+      const bin = bins.find((item) => item.channelId === channelId);
+      return Boolean(bin) && (bin.lat === null || bin.lng === null);
+    });
+
+    /**
+     * A truck left ON_ROUTE with neither a run nor an assignment is the same
+     * fault one step further along — whatever it was carrying is already gone.
+     * Every legitimate path sets the status and the work in one commit, so this
+     * pairing only exists when something was interrupted.
+     */
+    const ghosts = trucks.filter(
+      (truck) =>
+        truck.status === 'ON_ROUTE' &&
+        !runs[truck.id] &&
+        !routing.current.has(truck.id) &&
+        !Object.values(assignments).some((item) => item?.truckId === truck.id),
+    );
+
+    if (stranded.length === 0 && ghosts.length === 0) return;
+
+    const freed = new Set([
+      ...stranded.map(([, assignment]) => assignment.truckId),
+      ...ghosts.map((truck) => truck.id),
+    ]);
+
+    if (stranded.length > 0) {
+      setAssignments((current) => {
+        const next = { ...current };
+        stranded.forEach(([channelId]) => delete next[channelId]);
+        return next;
+      });
+    }
+
+    setTrucks((fleet) =>
+      fleet.map((truck) => (freed.has(truck.id) ? { ...truck, status: 'IDLE' } : truck)),
+    );
+
+    stranded.forEach(([channelId, assignment]) => {
+      const bin = bins.find((item) => item.channelId === channelId);
+      pushAlert({
+        kind: 'OFFLINE',
+        title: `${assignment.truckId} released — ${bin?.id ?? channelId} has no location`,
+        detail: 'Set the bin’s coordinates in Settings and it can be collected again.',
+        channelId,
+      });
+    });
+  }, [assignments, runs, bins, trucks, setAssignments, setTrucks, pushAlert]);
+
   /* ── hands-off dispatch ─────────────────────────────────────────────────── */
 
   /**
@@ -953,6 +1038,16 @@ export const EcoBinProvider = ({ children }) => {
         // Urgent AND actually a collection job — see binPriority.
         entry.needsCollection &&
         !entry.bin.assignment &&
+        /*
+         * A bin with no coordinates cannot be routed to, and a truck sent to
+         * one never gets a run: it sits marked ON_ROUTE with nothing driving
+         * it, holds its assignment forever, and is gone from the idle pool —
+         * so the second full bin never gets a truck either. The bin is still
+         * ranked, still red, and still says it has no location; it just does
+         * not consume a vehicle until someone gives it one.
+         */
+        entry.bin.lat !== null &&
+        entry.bin.lng !== null &&
         // An operator who called off a dispatch is not overruled on the next poll.
         !(dispatchHolds[entry.bin.channelId] > now),
     );
@@ -1015,6 +1110,11 @@ export const EcoBinProvider = ({ children }) => {
   const assignTruck = useCallback(
     (channelId, truckId) => {
       const bin = bins.find((item) => item.channelId === channelId);
+      // Same reason auto-dispatch skips these: there is no route to plan, so
+      // the truck would never arrive, never finish, and never come back.
+      if (bin && (bin.lat === null || bin.lng === null)) {
+        return { ok: false, reason: 'no-position' };
+      }
       // Named truck first; otherwise the best-fitting free one, by the same
       // rule auto-dispatch uses. It used to take whichever idle truck happened
       // to be first in the list, which sent the biggest vehicle to the lightest

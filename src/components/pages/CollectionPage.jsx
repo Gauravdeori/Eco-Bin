@@ -90,7 +90,12 @@ export const CollectionPage = () => {
                   ) : (
                     <Button
                       variant="primary"
-                      disabled={trucks.length === 0}
+                      disabled={trucks.length === 0 || bin.lat === null || bin.lng === null}
+                      title={
+                        bin.lat === null || bin.lng === null
+                          ? 'No coordinates, so no route can be planned. Set them in Settings.'
+                          : undefined
+                      }
                       onClick={() => assignTruck(bin.channelId)}
                     >
                       Assign
