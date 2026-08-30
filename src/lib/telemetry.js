@@ -315,6 +315,14 @@ export const applyOverlays = (bin, { assignments, maintenance, reports, arrived 
    * shows it — which is also what flips the pin back to Normal.
    */
   const reached = Boolean(arrived?.has?.(bin.channelId));
+  /**
+   * The operator's own flag, kept separate from the derived status.
+   *
+   * A bin with no fill reading also derives as MAINTENANCE, and the two mean
+   * opposite things: one is parked on purpose, the other is a bin nobody can
+   * see into. Only the first should stop it being ranked.
+   */
+  const flaggedForMaintenance = Boolean(maintenance[bin.channelId]);
   const openReport = reports.find(
     (report) => report.channelId === bin.channelId && report.status !== 'RESOLVED',
   );
@@ -372,6 +380,7 @@ export const applyOverlays = (bin, { assignments, maintenance, reports, arrived 
     fill,
     weight,
     awaitingCollection,
+    flaggedForMaintenance,
     status,
     assignment: assignment ?? null,
     openReport: openReport ?? null,
@@ -665,10 +674,20 @@ export const binPriority = (bin, { thresholds, now = Date.now() }) => {
     );
   }
 
-  // Parked by the operator, so it is not a collection decision any more.
-  if (bin.status === STATUS.MAINTENANCE) {
+  /**
+   * Parked by the operator, so it is not a collection decision any more.
+   *
+   * Keyed on the operator's flag rather than the status, because a bin whose
+   * sensor sends no fill reading derives the same status — and capping that
+   * one buried a bin nobody could see into at the bottom of the ranking,
+   * labelled as though somebody had chosen to park it. A blind bin is a
+   * problem to surface, not to silence.
+   */
+  if (bin.flaggedForMaintenance ?? bin.status === STATUS.MAINTENANCE) {
     score = Math.min(score, 15);
     reasons.unshift('Under maintenance');
+  } else if (bin.fill === null && !bin.isOffline) {
+    reasons.push('Reporting, but sending no fill level');
   }
 
   score = Math.round(Math.max(0, Math.min(100, score)));
