@@ -714,6 +714,14 @@ export const LiveBinMap = ({ height = 'h-[340px]', scrollZoom = false }) => {
                       <span>
                         Weight{' '}
                         <b className="tabular">{bin.weight === null ? '—' : `${bin.weight} kg`}</b>
+                        {bin.weightHeld && (
+                          <span
+                            className="ml-1 rounded bg-amber-100 px-1 text-[9px] font-bold text-amber-700"
+                            title="Load cell reads 0 — showing the last load until the bin is collected"
+                          >
+                            held
+                          </span>
+                        )}
                       </span>
                     </div>
                     {bin.status === STATUS.FULL && (

@@ -9,6 +9,7 @@ import {
   Droplets,
   Wrench,
   Radio,
+  AlertTriangle,
 } from 'lucide-react';
 import { useEcoBin } from '../../context/EcoBinContext';
 import {
@@ -171,6 +172,13 @@ export const BinDetailsPanel = () => {
           <p className="mt-1 text-[11px] text-slate-400">
             {bin.capacityKg ? `Capacity: ${bin.capacityKg} kg` : 'Capacity not set'}
           </p>
+          {/* Say when this is the last real load rather than a live reading. */}
+          {bin.weightHeld && (
+            <p className="mt-1 flex items-start gap-1 text-[10px] leading-snug text-amber-300">
+              <AlertTriangle className="mt-px h-3 w-3 shrink-0" />
+              Load cell reads 0 — holding the last load until collection
+            </p>
+          )}
           {capacityPct !== null && (
             <Meter value={capacityPct} color="bg-emerald-500" className="mt-2.5 bg-white/10" />
           )}

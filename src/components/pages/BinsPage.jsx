@@ -130,6 +130,14 @@ export const BinsPage = () => {
                     </td>
                     <td className="px-3 py-3 tabular text-slate-700 dark:text-slate-300">
                       {formatNumber(bin.weight, ' kg')}
+                      {bin.weightHeld && (
+                        <span
+                          className="ml-1 rounded bg-amber-100 px-1 text-[9px] font-bold text-amber-700 dark:bg-amber-500/15 dark:text-amber-400"
+                          title="Load cell reads 0 — showing the last load until the bin is collected"
+                        >
+                          held
+                        </span>
+                      )}
                     </td>
                     <td
                       className={cx(

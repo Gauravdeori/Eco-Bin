@@ -112,6 +112,49 @@ export const findCollections = (readings, dropPercent) => {
 };
 
 /**
+ * The weight to show, holding the last real load until the bin is emptied.
+ *
+ * A load cell reads zero the moment anything lifts the bag off it — someone
+ * pressing down on the lid, a sack being straightened, the sensor being knocked
+ * during a test. The bin is still full; only the reading collapsed, and taking
+ * it at face value drops the bin off the weight-based side of the ranking and
+ * makes the fleet total lie.
+ *
+ * So a zero that arrives while the bin is still holding waste is treated as the
+ * measurement failing rather than the bin emptying, and the last real load
+ * stands until something actually empties it.
+ *
+ * What releases it is a collection, which is detected from the fill level
+ * dropping — so the two sensors check each other. Weight alone cannot say the
+ * bin was emptied, because a zero is exactly what a broken reading looks like;
+ * fill dropping by a quarter is a thing only an emptied bin does.
+ *
+ * Returns the held value and whether it is being held, so the interface can say
+ * which of the two it is showing rather than passing a stale number off as live.
+ */
+export const heldWeight = (readings, lastCollected) => {
+  const latest = readings[readings.length - 1] ?? null;
+  const live = latest?.weight ?? null;
+
+  // A real reading is kept as it is, and so is a bin with no load cell at all.
+  if (live === null || live > 0) return { weight: live, held: false };
+
+  // Only look back as far as the last time the bin was emptied. Before that is
+  // a different load, and a previous cycle's weight is not this one's.
+  const since = lastCollected ? lastCollected.getTime() : -Infinity;
+  for (let i = readings.length - 1; i >= 0; i -= 1) {
+    const reading = readings[i];
+    if (reading.at.getTime() <= since) break;
+    if (reading.weight !== null && reading.weight > 0) {
+      return { weight: reading.weight, held: true, at: reading.at };
+    }
+  }
+
+  // Genuinely nothing since the last collection: the bin really is empty.
+  return { weight: live, held: false };
+};
+
+/**
  * Builds one bin from one channel's feed.
  * `readings` are ordered oldest to newest, the order ThingSpeak returns them in.
  */
@@ -154,6 +197,8 @@ export const buildBin = (
   }
 
   const collections = findCollections(readings, collectionDropPercent);
+  const lastCollected = collections.length ? collections[collections.length - 1].at : null;
+  const load = heldWeight(readings, lastCollected);
   const capacityKg = toNumber(meta.capacityKg);
 
   return {
@@ -163,7 +208,10 @@ export const buildBin = (
     ward: meta.ward || '',
     capacityKg,
     fill: latest?.fill ?? null,
-    weight: latest?.weight ?? null,
+    weight: load.weight,
+    /** True when the load cell read zero but the bin has not been emptied. */
+    weightHeld: Boolean(load.held),
+    weightHeldSince: load.at ?? null,
     battery: latest?.battery ?? null,
     temperature: latest?.temperature ?? null,
     humidity: latest?.humidity ?? null,
@@ -178,7 +226,7 @@ export const buildBin = (
     telemetryStatus: deriveStatus(latest?.fill ?? null, { thresholds, isOffline }),
     readings,
     collections,
-    lastCollected: collections.length ? collections[collections.length - 1].at : null,
+    lastCollected,
     lastEntryId: toNumber(channel.last_entry_id),
   };
 };
