@@ -150,6 +150,18 @@ export const BinDetailsPanel = () => {
         </div>
       </div>
 
+      {bin.sensorHealth && !bin.sensorHealth.ok && (
+        <div className="flex items-start gap-2 rounded-xl bg-amber-500/15 px-3 py-2.5">
+          <AlertTriangle className="mt-px h-4 w-4 shrink-0 text-amber-400" />
+          <div className="min-w-0">
+            <p className="text-xs font-bold text-amber-300">Sensor needs checking</p>
+            <p className="mt-0.5 text-[11px] leading-snug text-amber-200/80">
+              {bin.sensorHealth.reason}
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Fill + weight */}
       <div className="grid grid-cols-2 gap-3">
         <div className="flex flex-col items-center justify-center rounded-xl bg-white/5 p-3">

@@ -101,6 +101,9 @@ const buildSimBin = (site, index, { centre, thresholds, now, collectedAt = null,
     category: null,
     lat,
     lng,
+    // A simulated sensor never fails; the field exists so simulated and real
+    // bins are the same shape everywhere downstream.
+    sensorHealth: { ok: true, reason: null },
     positionSource: 'manual',
     positionWarning: null,
     lastSeen: latest.at,

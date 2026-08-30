@@ -703,6 +703,11 @@ export const LiveBinMap = ({ height = 'h-[340px]', scrollZoom = false }) => {
                       )}
                       {bin.location}
                     </p>
+                    {bin.sensorHealth && !bin.sensorHealth.ok && (
+                      <p className="mt-1 rounded bg-amber-100 px-1.5 py-1 text-[10px] font-semibold leading-snug text-amber-800">
+                        Sensor needs checking — {bin.sensorHealth.reason}
+                      </p>
+                    )}
                     <p className="mt-0.5 font-mono text-[10px] text-slate-400">
                       {bin.lat.toFixed(5)}, {bin.lng.toFixed(5)}
                       {bin.positionSource ? ` · ${SOURCE_LABEL[bin.positionSource]}` : ''}

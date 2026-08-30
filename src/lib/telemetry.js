@@ -271,6 +271,7 @@ export const buildBin = (
     category: lastMeasured('category'),
     lat,
     lng,
+    sensorHealth: sensorHealth(readings),
     positionSource: lat === null ? null : positionSource,
     positionWarning,
     lastSeen,
@@ -693,3 +694,39 @@ export const priorityRanking = (bins, options) =>
   bins
     .map((bin) => ({ bin, ...binPriority(bin, options) }))
     .sort((a, b) => b.score - a.score || (b.bin.fill ?? -1) - (a.bin.fill ?? -1));
+
+/* -- sensor health -------------------------------------------------------- */
+
+/**
+ * Whether a channel's readings look like measurements at all.
+ *
+ * A sensor that has failed does not stop publishing — it publishes zero, or
+ * nonsense, on schedule. The dashboard would render that as a confident "0%",
+ * which is worse than showing nothing: an operator reads it as an empty bin
+ * rather than as a broken one, and the ranking dutifully agrees.
+ *
+ * Two signatures give it away. A reading of exactly zero, over and over, is a
+ * failed read rather than an empty bin — real waste levels wander. And values
+ * the calibration had to throw out are dropouts by definition. Either one
+ * dominating the recent history means the number on screen cannot be trusted.
+ */
+export const sensorHealth = (readings, { sample = 40, tolerance = 0.6 } = {}) => {
+  const recent = readings.slice(-sample);
+  if (recent.length < 8) return { ok: true, reason: null };
+
+  const zero = recent.filter((r) => r.fill === 0).length;
+  const dropped = recent.filter((r) => r.fill === null).length;
+  const bad = zero + dropped;
+  const share = bad / recent.length;
+  if (share < tolerance) return { ok: true, reason: null };
+
+  const parts = [];
+  if (zero) parts.push(`${Math.round((zero / recent.length) * 100)}% read exactly zero`);
+  if (dropped) parts.push(`${Math.round((dropped / recent.length) * 100)}% unusable`);
+
+  return {
+    ok: false,
+    share,
+    reason: `${parts.join(', ')} of the last ${recent.length} readings — the sensor is reporting, but not measuring.`,
+  };
+};
