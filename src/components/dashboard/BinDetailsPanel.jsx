@@ -79,7 +79,6 @@ export const BinDetailsPanel = () => {
     toggleMaintenance,
     trucks,
     setPage,
-    dispatchLocked,
   } = useEcoBin();
 
   if (!bin) {
@@ -276,21 +275,15 @@ export const BinDetailsPanel = () => {
           <button
             type="button"
             onClick={() => assignTruck(bin.channelId)}
-            disabled={trucks.length === 0 || dispatchLocked}
+            disabled={trucks.length === 0}
             title={
-              dispatchLocked
-                ? 'Dispatch is controlled by n8n — a truck goes out when the workflow says so'
-                : trucks.length === 0
-                  ? 'Add a truck on the Trucks page first'
-                  : undefined
+              trucks.length === 0
+                ? 'Add a truck on the Trucks page first'
+                : 'Sends a truck now, without waiting for auto-dispatch'
             }
             className="flex-1 rounded-xl bg-brand-500 px-4 py-3 text-sm font-bold text-white transition-colors hover:bg-brand-400 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
           >
-            {dispatchLocked
-              ? 'Waiting on n8n'
-              : trucks.length === 0
-                ? 'Add a truck to dispatch'
-                : 'Dispatch a Truck'}
+            {trucks.length === 0 ? 'Add a truck to dispatch' : 'Dispatch a Truck'}
           </button>
         )}
         <button

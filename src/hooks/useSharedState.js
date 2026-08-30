@@ -100,5 +100,10 @@ export const useSharedState = (key, initialValue, { revive } = {}) => {
     );
   }, [key, value, ready]);
 
-  return [value, setValue];
+  /**
+   * `ready` is handed back so a caller can tell "the fleet is empty" from "the
+   * fleet has not arrived yet". Seeding on the second would write over whatever
+   * the shared workspace actually holds, a moment before it turns up.
+   */
+  return [value, setValue, ready];
 };

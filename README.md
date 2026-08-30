@@ -81,8 +81,22 @@ Everything else is off by default and shows as `—`. Turn any of it on under
 | Avg fill at collection | How full bins actually were when they were emptied |
 
 Trucks and citizen reports are records you own rather than sensor data, so they live
-in this browser's `localStorage`. Add your fleet on the **Trucks** page; reports come
-in through the citizen app panel (the phone icon in the header).
+in this browser's `localStorage` (or, with Firebase configured, in the shared
+workspace). Reports come in through the citizen app panel — the phone icon in the
+header.
+
+### Collection runs itself
+
+Auto-dispatch is on out of the box. A bin that is both urgent enough and genuinely
+needs emptying gets a truck without anyone pressing anything: the route is planned,
+the truck drives it, each stop is marked collected on arrival, and the truck goes
+back to idle at the depot. Every dispatch shows up in the alert feed.
+
+A starter fleet of three trucks is created on first run so there is something to
+dispatch. Rename them, set real capacities and drivers, or replace them entirely on
+the **Trucks** page — an empty fleet stays empty. The threshold and the pause after
+a cancelled dispatch are on the **Settings** page, along with the switch to turn the
+whole thing off; the manual dispatch buttons keep working either way.
 
 ---
 

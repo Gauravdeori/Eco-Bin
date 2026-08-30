@@ -4,8 +4,8 @@
  * EcoBin runs perfectly well without it: every operator-owned record falls back
  * to localStorage, which is where all of them lived until now. Adding Firebase
  * changes one thing — the records stop being private to a single browser tab, so
- * two operators finally see the same fleet, and n8n can drop a dispatch command
- * straight into the page instead of the page having to keep asking for one.
+ * two operators finally see the same fleet, and a truck dispatched on one
+ * machine shows up on the other.
  *
  * The web config below is not a secret. Firebase publishes it on purpose: it
  * names the project rather than authenticating anyone, and it ships in any
@@ -57,9 +57,6 @@ export const firebaseError = failure;
 
 /** Where one piece of shared state lives. */
 export const docPath = (key) => ['ecobin', WORKSPACE, 'state', key];
-
-/** Where n8n drops dispatch commands. */
-export const COMMANDS_PATH = ['ecobin', WORKSPACE, 'commands'];
 
 /**
  * Where the freshest reading per channel lives, one document per bin.
