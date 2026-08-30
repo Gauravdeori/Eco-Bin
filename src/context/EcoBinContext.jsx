@@ -9,10 +9,12 @@ import React, {
 } from 'react';
 import { loadSettings, saveSettings, DEFAULT_SETTINGS } from '../config/settings';
 import { useThingSpeak } from '../hooks/useThingSpeak';
-import { useLocalState } from '../hooks/useLocalState';
+import { useSharedState } from '../hooks/useSharedState';
 import { simulatedBins } from '../lib/simulation';
 import { headingDeg, planFleetRuns, positionAlong, sweepPartition } from '../services/fleet';
 import { fetchCommands } from '../services/n8n';
+import { collection, onSnapshot, runTransaction, serverTimestamp } from 'firebase/firestore';
+import { COMMANDS_PATH, WORKSPACE, firebaseConfigured, firestore } from '../services/firebase';
 import {
   STATUS,
   applyOverlays,
@@ -73,17 +75,17 @@ export const EcoBinProvider = ({ children }) => {
   });
 
   /* ── operator-owned records (persisted locally, never seeded) ───────────── */
-  const [reports, setReports] = useLocalState('ecobin.reports.v1', [], { revive: reviveReports });
-  const [alerts, setAlerts] = useLocalState('ecobin.alerts.v1', [], { revive: reviveAlerts });
-  const [trucks, setTrucks] = useLocalState('ecobin.trucks.v1', []);
-  const [assignments, setAssignments] = useLocalState('ecobin.assignments.v1', {});
-  const [maintenance, setMaintenance] = useLocalState('ecobin.maintenance.v1', {});
+  const [reports, setReports] = useSharedState('ecobin.reports.v1', [], { revive: reviveReports });
+  const [alerts, setAlerts] = useSharedState('ecobin.alerts.v1', [], { revive: reviveAlerts });
+  const [trucks, setTrucks] = useSharedState('ecobin.trucks.v1', []);
+  const [assignments, setAssignments] = useSharedState('ecobin.assignments.v1', {});
+  const [maintenance, setMaintenance] = useSharedState('ecobin.maintenance.v1', {});
   /** channelId → epoch ms until which auto-dispatch leaves a bin alone. */
-  const [dispatchHolds, setDispatchHolds] = useLocalState('ecobin.dispatchholds.v1', {});
+  const [dispatchHolds, setDispatchHolds] = useSharedState('ecobin.dispatchholds.v1', {});
   /** truckId → the run it is currently driving. */
-  const [runs, setRuns] = useLocalState('ecobin.runs.v1', {});
+  const [runs, setRuns] = useSharedState('ecobin.runs.v1', {});
   /** channelId → when a simulated truck last emptied it. */
-  const [simCollections, setSimCollections] = useLocalState('ecobin.simcollections.v1', {});
+  const [simCollections, setSimCollections] = useSharedState('ecobin.simcollections.v1', {});
 
   /**
    * Live views of state the n8n poller needs.
@@ -849,7 +851,7 @@ export const EcoBinProvider = ({ children }) => {
   /* ── n8n dispatch control ───────────────────────────────────────────────── */
 
   /** Commands already acted on, so a repeated poll is not a repeated dispatch. */
-  const [handledCommands, setHandledCommands] = useLocalState('ecobin.n8n.handled.v1', []);
+  const [handledCommands, setHandledCommands] = useSharedState('ecobin.n8n.handled.v1', []);
   const [n8nStatus, setN8nStatus] = useState({ state: 'idle', at: null, error: null });
 
   const n8n = settings.n8n;
@@ -1015,6 +1017,97 @@ export const EcoBinProvider = ({ children }) => {
   });
 
   /**
+   * Acts on one dispatch command, whichever channel it arrived on.
+   *
+   * Returns whether a truck actually went out, so a caller can say something
+   * useful when one could not.
+   */
+  const runCommand = useCallback(
+    (ref, truckId) => {
+      // n8n may name a bin by channel or by the label an operator typed.
+      const bin =
+        binsRef.current.find((item) => item.channelId === ref) ??
+        binsRef.current.find((item) => item.id === ref);
+      if (!bin) return { ok: false, reason: 'unknown-bin' };
+
+      /**
+       * A bin already on its way is left alone.
+       *
+       * A workflow watching ThingSpeak reports a bin as full for as long as it
+       * is full, which is every reading until a truck empties it. Without this
+       * the same bin would be dispatched again on every report, reassigning it
+       * and pulling a second truck off whatever it was doing.
+       */
+      if (bin.assignment) return { ok: true, reason: 'already-assigned', bin };
+
+      const result = assignTruckRef.current(bin.channelId, truckId ?? undefined, {
+        source: 'n8n',
+      });
+      if (!result.ok) {
+        pushAlert({
+          kind: 'OFFLINE',
+          title: `n8n asked for ${bin.id} but no truck was free`,
+          detail: 'Add a truck or wait for one to finish its run.',
+          channelId: bin.channelId,
+        });
+      }
+      return { ...result, bin };
+    },
+    [pushAlert],
+  );
+
+  /**
+   * Dispatch commands written straight into Firestore.
+   *
+   * This is the version worth having: n8n writes a document and the truck goes
+   * out on the next tick of the network, with no polling interval to wait
+   * through and no CORS headers to get right. The webhook poller below stays
+   * for deployments with no Firebase project.
+   *
+   * Claiming happens in a transaction. Two dashboards watching the same
+   * workspace will both see an unhandled command at the same instant, and
+   * without the claim they would both send a truck to it.
+   */
+  useEffect(() => {
+    if (!firestore) return undefined;
+
+    return onSnapshot(
+      collection(firestore, ...COMMANDS_PATH),
+      (snapshot) => {
+        snapshot.docChanges().forEach(async (change) => {
+          if (change.type === 'removed') return;
+          const data = change.doc.data();
+          if (data.handledAt) return;
+
+          const ref = String(
+            data.channelId ?? data.channel_id ?? data.binId ?? data.bin_id ?? data.bin ?? '',
+          );
+          if (!ref) return;
+
+          try {
+            const claimed = await runTransaction(firestore, async (tx) => {
+              const fresh = await tx.get(change.doc.ref);
+              if (!fresh.exists() || fresh.data().handledAt) return false;
+              tx.update(change.doc.ref, {
+                handledAt: serverTimestamp(),
+                handledBy: WORKSPACE,
+              });
+              return true;
+            });
+            if (claimed) runCommand(ref, data.truckId ?? data.truck_id ?? null);
+          } catch {
+            // Another dashboard claimed it, or rules refused the write. Either
+            // way this one should not also dispatch.
+          }
+        });
+      },
+      () => {
+        /* offline or refused — the webhook poller and manual dispatch remain */
+      },
+    );
+  }, [runCommand]);
+
+  /**
    * Polls n8n for bins it wants collected.
    *
    * Nothing can push into a page with no server behind it, so the workflow is
@@ -1039,43 +1132,12 @@ export const EcoBinProvider = ({ children }) => {
         const fresh = commands.filter((command) => !handled.has(command.id));
         if (fresh.length === 0) return;
 
-        const accepted = [];
-        fresh.forEach((command) => {
-          // n8n may name a bin by channel or by the label an operator typed.
-          const bin =
-            binsRef.current.find((item) => item.channelId === command.bin) ??
-            binsRef.current.find((item) => item.id === command.bin);
-
-          // A command for a bin this dashboard does not have is still marked
-          // handled: it will never match, and retrying it every tick forever
-          // is worse than dropping it once.
-          accepted.push(command.id);
-          if (!bin) return;
-
-          /**
-           * A bin already on its way is left alone.
-           *
-           * A workflow watching ThingSpeak reports a bin as full for as long as
-           * it *is* full, which is every reading until a truck empties it. Each
-           * of those is a new reading and so a new command id, and without this
-           * the same bin would be dispatched again on every poll — reassigning
-           * it, and pulling a second truck off whatever it was doing. The
-           * command is still marked handled, because it has been dealt with:
-           * the truck is already going.
-           */
-          if (bin.assignment) return;
-
-          const result = assignTruckRef.current(bin.channelId, command.truckId ?? undefined, {
-            source: 'n8n',
-          });
-          if (!result.ok) {
-            pushAlert({
-              kind: 'OFFLINE',
-              title: `n8n asked for ${bin.id} but no truck was free`,
-              detail: 'Add a truck or wait for one to finish its run.',
-              channelId: bin.channelId,
-            });
-          }
+        // A command naming a bin this dashboard does not have is still marked
+        // handled: it will never match, and retrying it every tick forever is
+        // worse than dropping it once.
+        const accepted = fresh.map((command) => {
+          runCommand(command.bin, command.truckId);
+          return command.id;
         });
 
         if (accepted.length > 0) {
@@ -1095,7 +1157,7 @@ export const EcoBinProvider = ({ children }) => {
       controller.abort();
       clearInterval(id);
     };
-  }, [n8n?.enabled, n8n?.url, n8n?.pollSeconds, pushAlert, setHandledCommands]);
+  }, [n8n?.enabled, n8n?.url, n8n?.pollSeconds, runCommand, setHandledCommands]);
 
   const value = {
     theme,
@@ -1122,6 +1184,7 @@ export const EcoBinProvider = ({ children }) => {
     runs,
     n8nStatus,
     dispatchLocked,
+    sharedBackend: firebaseConfigured ? 'firebase' : 'local',
     ranking,
     priorityByChannel,
     fleetRuns,
