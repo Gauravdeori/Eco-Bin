@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
-import { Truck, Plus, Trash } from 'lucide-react';
+import { Truck, Plus, Trash, MapPin } from 'lucide-react';
 import { useEcoBin } from '../../context/EcoBinContext';
 import { TrucksPanel } from '../dashboard/TrucksPanel';
+import { LocationPicker } from '../settings/LocationPicker';
+import { validCoords } from '../../lib/telemetry';
 import { Card, CardHeader, EmptyState, Field, Button, inputClass, cx } from '../ui/Primitives';
 
 const STATUS_OPTIONS = [
@@ -11,8 +13,11 @@ const STATUS_OPTIONS = [
 ];
 
 export const TrucksPage = () => {
-  const { trucks, addTruck, removeTruck, setTruckStatus, assignments, bins } = useEcoBin();
+  const { trucks, addTruck, removeTruck, setTruckStatus, setTruckBase, assignments, bins } =
+    useEcoBin();
   const [form, setForm] = useState({ id: '', driver: '', capacityKg: '' });
+  /** Which truck's base is being placed on the map, if any. */
+  const [parking, setParking] = useState(null);
 
   const submit = (event) => {
     event.preventDefault();
@@ -82,6 +87,7 @@ export const TrucksPage = () => {
                   <tr className="border-y border-slate-100 text-[10px] uppercase tracking-wide text-slate-400 dark:border-slate-800">
                     <th className="px-5 py-2.5 font-bold">Truck</th>
                     <th className="px-3 py-2.5 font-bold">Driver</th>
+                    <th className="px-3 py-2.5 font-bold">Waits at</th>
                     <th className="px-3 py-2.5 font-bold">Current stop</th>
                     <th className="px-3 py-2.5 font-bold">Status</th>
                     <th className="px-5 py-2.5" />
@@ -102,6 +108,30 @@ export const TrucksPage = () => {
                         </td>
                         <td className="px-3 py-3 text-slate-700 dark:text-slate-300">
                           {truck.driver}
+                        </td>
+                        {/*
+                          Where the truck waits is what decides which bin it is
+                          sent to — dispatch offers a job to the nearest free
+                          vehicle — so it is edited here beside the driver
+                          rather than buried in Settings.
+                        */}
+                        <td className="px-3 py-3">
+                          <button
+                            type="button"
+                            onClick={() => setParking(truck.id)}
+                            className="flex items-center gap-1.5 text-left text-[11px] font-semibold text-emerald-700 hover:underline dark:text-emerald-400"
+                          >
+                            <MapPin className="h-3.5 w-3.5 shrink-0" />
+                            {validCoords(Number(truck.baseLat), Number(truck.baseLng)) ? (
+                              <span className="tabular">
+                                {Number(truck.baseLat).toFixed(4)}, {Number(truck.baseLng).toFixed(4)}
+                              </span>
+                            ) : (
+                              <span className="text-slate-400 dark:text-slate-500">
+                                Depot · set
+                              </span>
+                            )}
+                          </button>
                         </td>
                         <td className="px-3 py-3 text-slate-700 dark:text-slate-300">
                           {target ? (
@@ -152,6 +182,19 @@ export const TrucksPage = () => {
       </div>
 
       <TrucksPanel />
+
+      {parking && (
+        <LocationPicker
+          binLabel={`${parking} · where it waits`}
+          lat={trucks.find((truck) => truck.id === parking)?.baseLat}
+          lng={trucks.find((truck) => truck.id === parking)?.baseLng}
+          onClose={() => setParking(null)}
+          onSave={(lat, lng) => {
+            setTruckBase(parking, lat, lng);
+            setParking(null);
+          }}
+        />
+      )}
     </div>
   );
 };

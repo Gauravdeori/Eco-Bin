@@ -12,11 +12,13 @@ import { useThingSpeak } from '../hooks/useThingSpeak';
 import { useSharedState } from '../hooks/useSharedState';
 import { simulatedBins } from '../lib/simulation';
 import { headingDeg, planFleetRuns, positionAlong, sweepPartition } from '../services/fleet';
+import { haversineM } from '../services/routing';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { LIVE_PATH, firebaseConfigured, firestore } from '../services/firebase';
 import {
   STATUS,
   applyOverlays,
+  validCoords,
   buildBin,
   collectionTrend,
   priorityLevel,
@@ -58,6 +60,27 @@ const STARTER_FLEET = [
 
 /** Set once a browser has been offered the starter fleet, so it is offered once. */
 const FLEET_SEEDED_KEY = 'ecobin.fleet.seeded.v1';
+
+/**
+ * Where a free truck is waiting.
+ *
+ * Its own base if the operator has parked it somewhere, otherwise the depot —
+ * which is where a finished run leaves it, so it is the truthful default rather
+ * than a convenient one.
+ */
+const truckBase = (truck, depot) =>
+  validCoords(Number(truck.baseLat), Number(truck.baseLng))
+    ? [Number(truck.baseLat), Number(truck.baseLng)]
+    : depot;
+
+/**
+ * How far apart two trucks have to be before the difference is worth acting on.
+ *
+ * Inside this, "nearer" is noise — the straight line is not the road, and a
+ * hundred metres of it is well inside the error. Treating those as a tie is
+ * what stops the choice flickering between two vehicles parked in the same yard.
+ */
+const SAME_PLACE_M = 100;
 
 /** Simulation clock granularity — see where simNow is set. */
 const SIM_TICK_MS = 15 * 1000;
@@ -1009,18 +1032,36 @@ export const EcoBinProvider = ({ children }) => {
   }, [trucksReady, setTrucks]);
 
   /**
-   * Trucks carry no position, so "nearest" is not a question this data can
-   * answer and pretending otherwise would be a lie in the UI. Fit is the
-   * honest rule instead: the smallest truck that can still take the load, so
-   * the big one stays free for the next full bin.
+   * Which free truck goes to this bin.
+   *
+   * Nearest wins, the way a ride goes to the closest free driver rather than to
+   * whoever has been waiting longest. Distance is the straight line from where
+   * the truck is waiting to the bin: with a handful of vehicles to choose
+   * between, that orders them the same way road distance would, and asking a
+   * routing service for a real ETA per candidate would spend a request per
+   * truck per dispatch — which is exactly what emptied the last API key.
+   *
+   * Capacity still decides who is eligible, and still settles a tie. Trucks
+   * with no base of their own are all waiting at the depot, so they are all
+   * genuinely the same distance away, and then the smallest vehicle that can
+   * take the load is the right one to send.
    */
-  const pickTruck = (bin, pool) => {
+  const pickTruck = (bin, pool, depot) => {
     const fits = pool.filter(
       (truck) => !truck.capacityKg || bin.weight === null || truck.capacityKg >= bin.weight,
     );
-    return [...(fits.length ? fits : pool)].sort(
-      (a, b) => (a.capacityKg ?? Infinity) - (b.capacityKg ?? Infinity),
-    )[0];
+    const eligible = fits.length ? fits : pool;
+    const target = bin.lat === null || bin.lng === null ? null : [bin.lat, bin.lng];
+
+    return [...eligible].sort((a, b) => {
+      if (target) {
+        const near =
+          Math.round(haversineM(truckBase(a, depot), target) / SAME_PLACE_M) -
+          Math.round(haversineM(truckBase(b, depot), target) / SAME_PLACE_M);
+        if (near !== 0) return near;
+      }
+      return (a.capacityKg ?? Infinity) - (b.capacityKg ?? Infinity);
+    })[0];
   };
 
   const autoDispatch = settings.autoDispatch;
@@ -1059,9 +1100,13 @@ export const EcoBinProvider = ({ children }) => {
     const pairs = [];
     candidates.forEach((entry) => {
       if (pool.length === 0) return;
-      const truck = pickTruck(entry.bin, pool);
+      const truck = pickTruck(entry.bin, pool, depotPoint);
       pool.splice(pool.indexOf(truck), 1);
-      pairs.push({ entry, truck });
+      pairs.push({
+        entry,
+        truck,
+        awayM: haversineM(truckBase(truck, depotPoint), [entry.bin.lat, entry.bin.lng]),
+      });
     });
     if (pairs.length === 0) return;
 
@@ -1088,11 +1133,13 @@ export const EcoBinProvider = ({ children }) => {
       ),
     );
 
-    pairs.forEach(({ entry, truck }) => {
+    pairs.forEach(({ entry, truck, awayM }) => {
       pushAlert({
         kind: 'DISPATCH',
         title: `${truck.id} auto-assigned to ${entry.bin.id}`,
-        detail: `Priority ${entry.score} · ${entry.reasons[0] ?? entry.bin.location}`,
+        // The distance is the reason this truck and not another one, so it is
+        // said here rather than left for someone to work out from the map.
+        detail: `Nearest free truck, ${(awayM / 1000).toFixed(1)} km away · priority ${entry.score}`,
         channelId: entry.bin.channelId,
       });
     });
@@ -1101,6 +1148,7 @@ export const EcoBinProvider = ({ children }) => {
     trucks,
     dispatchHolds,
     autoDispatch,
+    depotPoint,
     setAssignments,
     setTrucks,
     pushAlert,
@@ -1122,7 +1170,7 @@ export const EcoBinProvider = ({ children }) => {
       const idle = trucks.filter((item) => item.status === 'IDLE');
       const truck =
         trucks.find((item) => item.id === truckId) ??
-        (idle.length ? pickTruck(bin, idle) : null) ??
+        (idle.length ? pickTruck(bin, idle, depotPoint) : null) ??
         trucks[0];
       if (!bin || !truck) return { ok: false, reason: 'no-truck' };
 
@@ -1141,7 +1189,7 @@ export const EcoBinProvider = ({ children }) => {
       });
       return { ok: true, truck };
     },
-    [bins, trucks, setAssignments, setTrucks, pushAlert],
+    [bins, trucks, depotPoint, setAssignments, setTrucks, pushAlert],
   );
 
   const clearAssignment = useCallback(
@@ -1224,11 +1272,18 @@ export const EcoBinProvider = ({ children }) => {
   );
 
   const addTruck = useCallback(
-    ({ id, driver, capacityKg }) => {
+    ({ id, driver, capacityKg, baseLat = null, baseLng = null }) => {
       const truck = {
         id: id?.trim() || `TR-${String(trucks.length + 1).padStart(2, '0')}`,
         driver: driver?.trim() || 'Unassigned',
         capacityKg: Number(capacityKg) || null,
+        /**
+         * Where this truck waits. Null means the depot, which is where a run
+         * leaves it — parking trucks apart is what gives "nearest" something to
+         * choose between.
+         */
+        baseLat,
+        baseLng,
         status: 'IDLE',
       };
       setTrucks((current) => [...current, truck]);
@@ -1239,6 +1294,19 @@ export const EcoBinProvider = ({ children }) => {
 
   const removeTruck = useCallback(
     (truckId) => setTrucks((current) => current.filter((truck) => truck.id !== truckId)),
+    [setTrucks],
+  );
+
+  /** Parks a truck somewhere of its own, or back at the depot when cleared. */
+  const setTruckBase = useCallback(
+    (truckId, lat, lng) =>
+      setTrucks((current) =>
+        current.map((truck) =>
+          truck.id === truckId
+            ? { ...truck, baseLat: lat ?? null, baseLng: lng ?? null }
+            : truck,
+        ),
+      ),
     [setTrucks],
   );
 
@@ -1293,6 +1361,7 @@ export const EcoBinProvider = ({ children }) => {
     addTruck,
     removeTruck,
     setTruckStatus,
+    setTruckBase,
     clearAlerts,
   };
 
