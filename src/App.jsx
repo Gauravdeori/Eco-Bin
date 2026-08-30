@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Radio, ArrowRight } from 'lucide-react';
+import { X, Radio, ArrowRight, AlertTriangle } from 'lucide-react';
 import { EcoBinProvider, useEcoBin } from './context/EcoBinContext';
 import { isConfigured } from './config/settings';
 import { Sidebar } from './components/layout/Sidebar';
@@ -28,6 +28,53 @@ const PAGES = {
 };
 
 /** Shown until at least one ThingSpeak channel is connected. */
+/**
+ * A channel the dashboard cannot read.
+ *
+ * This used to surface only as a small chip in the top bar with the reason
+ * hidden in a tooltip, which is far too quiet for what it means: that bin is
+ * absent from the map, absent from the ranking, and will never be dispatched.
+ * A private channel added without its own read key fails exactly this way, and
+ * the symptom — automation appearing to do nothing — looks like a bug in the
+ * automation rather than a missing key.
+ */
+const ChannelErrorBanner = () => {
+  const { linkErrors, setPage } = useEcoBin();
+  if (linkErrors.length === 0) return null;
+
+  return (
+    <div className="flex flex-wrap items-start gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3.5 dark:border-rose-500/30 dark:bg-rose-500/10">
+      <span className="rounded-xl bg-white p-2 text-rose-600 dark:bg-rose-500/20">
+        <AlertTriangle className="h-4 w-4" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-xs font-bold text-rose-900 dark:text-rose-200">
+          {linkErrors.length === 1
+            ? 'A channel cannot be read'
+            : `${linkErrors.length} channels cannot be read`}
+        </p>
+        <ul className="mt-0.5 space-y-0.5">
+          {linkErrors.map((error) => (
+            <li key={error.channelId} className="text-[11px] text-rose-800/85 dark:text-rose-300/85">
+              {error.message}
+            </li>
+          ))}
+        </ul>
+        <p className="mt-1 text-[11px] text-rose-800/70 dark:text-rose-300/70">
+          Those bins are missing from the map and the ranking, so nothing will be dispatched to them.
+        </p>
+      </div>
+      <button
+        type="button"
+        onClick={() => setPage('settings')}
+        className="flex items-center gap-1.5 rounded-xl bg-rose-600 px-3.5 py-2 text-xs font-bold text-white hover:bg-rose-500"
+      >
+        Fix in Settings <ArrowRight className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  );
+};
+
 const SetupBanner = () => {
   const { setPage } = useEcoBin();
 
@@ -78,6 +125,7 @@ const Shell = () => {
         <main className="flex-1 px-4 pb-8 pt-4 lg:px-7">
           <div className="space-y-4">
             {!configured && page !== 'settings' && <SetupBanner />}
+            {page !== 'settings' && <ChannelErrorBanner />}
 
             <div className="flex flex-col gap-4 xl:flex-row xl:items-start">
               <div key={page} className="min-w-0 flex-1 animate-fade-in">
