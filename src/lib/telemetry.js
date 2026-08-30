@@ -72,11 +72,47 @@ export const suspiciousCoords = (lat, lng) => {
   return null;
 };
 
+/**
+ * Turns a raw sensor number into a fill percentage.
+ *
+ * A depth sensor publishes distance, not fullness, and the relationship is
+ * inverted: a short distance means the waste is near the lid, so the bin is
+ * full. Without calibration the dashboard was reading that distance as if it
+ * were already a percentage — clamping anything over 100 to "full" and every
+ * dropout to "empty", so a bin flickered between the two extremes and never
+ * sat anywhere sensible.
+ *
+ * `emptyAt` and `fullAt` are the raw readings the operator measures with the
+ * bin empty and with it full. Which is larger decides the direction, so the
+ * same two numbers describe a depth sensor and a fill-percentage sensor alike.
+ *
+ * Readings far outside that span are dropouts, not measurements. A depth
+ * sensor that hears no echo reports zero or a wild number, and either would
+ * otherwise land as a confident 0% or 100%.
+ */
+export const calibrateFill = (raw, calibration) => {
+  if (raw === null) return null;
+
+  const emptyAt = toNumber(calibration?.emptyAt);
+  const fullAt = toNumber(calibration?.fullAt);
+  // Uncalibrated channels are unchanged: the device is publishing a percentage.
+  if (emptyAt === null || fullAt === null || emptyAt === fullAt) return raw;
+
+  const span = Math.abs(fullAt - emptyAt);
+  const low = Math.min(emptyAt, fullAt) - span * 0.5;
+  const high = Math.max(emptyAt, fullAt) + span * 0.5;
+
+  // Zero is a failed read for any depth sensor — nothing sits at no distance.
+  if (raw === 0 || raw < low || raw > high) return null;
+
+  return ((raw - emptyAt) / (fullAt - emptyAt)) * 100;
+};
+
 /** Maps a raw ThingSpeak entry into a normalised reading. */
-export const parseEntry = (entry, fieldMap) => ({
+export const parseEntry = (entry, fieldMap, calibration) => ({
   at: new Date(entry.created_at),
   entryId: entry.entry_id,
-  fill: clampPercent(readField(entry, fieldMap.fill)),
+  fill: clampPercent(calibrateFill(readField(entry, fieldMap.fill), calibration)),
   weight: readField(entry, fieldMap.weight),
   battery: clampPercent(readField(entry, fieldMap.battery)),
   lat: readField(entry, fieldMap.lat) ?? toNumber(entry.latitude),
@@ -162,9 +198,26 @@ export const buildBin = (
   { channel, feeds, source },
   { fieldMap, thresholds, collectionDropPercent, binMeta, index = 0, now = Date.now() },
 ) => {
-  const readings = feeds.map((entry) => parseEntry(entry, fieldMap));
-  const latest = readings[readings.length - 1] ?? null;
   const meta = binMeta[source.channelId] ?? {};
+  const readings = feeds.map((entry) => parseEntry(entry, fieldMap, meta.calibration));
+  const latest = readings[readings.length - 1] ?? null;
+
+  /**
+   * The most recent reading that actually measured something.
+   *
+   * A depth sensor drops out often — no echo, a bag against the head — and
+   * those arrive as entries with nothing in them. Taking the last entry as the
+   * bin's state means one dropout blanks a bin the system otherwise knows the
+   * fill of, flipping it to Maintenance and out of the ranking. What the bin
+   * last actually read is the better answer, and `lastSeen` below still tracks
+   * transmissions, so a device that goes quiet is still detected as offline.
+   */
+  const lastMeasured = (key) => {
+    for (let i = readings.length - 1; i >= 0; i -= 1) {
+      if (readings[i][key] !== null) return readings[i][key];
+    }
+    return null;
+  };
 
   const lastSeen = latest?.at ?? null;
   const silentFor = lastSeen ? now - lastSeen.getTime() : null;
@@ -207,15 +260,15 @@ export const buildBin = (
     location: meta.location || channel.metadata || channel.description || 'Location not set',
     ward: meta.ward || '',
     capacityKg,
-    fill: latest?.fill ?? null,
+    fill: lastMeasured('fill'),
     weight: load.weight,
     /** True when the load cell read zero but the bin has not been emptied. */
     weightHeld: Boolean(load.held),
     weightHeldSince: load.at ?? null,
-    battery: latest?.battery ?? null,
-    temperature: latest?.temperature ?? null,
-    humidity: latest?.humidity ?? null,
-    category: latest?.category ?? null,
+    battery: lastMeasured('battery'),
+    temperature: lastMeasured('temperature'),
+    humidity: lastMeasured('humidity'),
+    category: lastMeasured('category'),
     lat,
     lng,
     positionSource: lat === null ? null : positionSource,
@@ -223,7 +276,7 @@ export const buildBin = (
     lastSeen,
     silentFor,
     isOffline,
-    telemetryStatus: deriveStatus(latest?.fill ?? null, { thresholds, isOffline }),
+    telemetryStatus: deriveStatus(lastMeasured('fill'), { thresholds, isOffline }),
     readings,
     collections,
     lastCollected,

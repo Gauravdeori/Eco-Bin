@@ -277,6 +277,51 @@ export const SettingsPage = () => {
                       />
                     </div>
 
+                    {/* Sensor calibration. A depth sensor publishes distance,
+                        not fullness, so without these two numbers the reading
+                        is taken as a percentage and the bin flickers between
+                        empty and full. */}
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                        Sensor
+                      </span>
+                      <input
+                        type="number"
+                        step="any"
+                        value={meta.calibration?.emptyAt ?? ''}
+                        onChange={(event) =>
+                          setMeta(channel.channelId, {
+                            calibration: {
+                              ...(meta.calibration ?? {}),
+                              emptyAt: event.target.value,
+                            },
+                          })
+                        }
+                        placeholder="Reading when empty"
+                        aria-label="Raw sensor reading with the bin empty"
+                        className={cx(inputClass, 'w-40 py-1.5 text-xs')}
+                      />
+                      <input
+                        type="number"
+                        step="any"
+                        value={meta.calibration?.fullAt ?? ''}
+                        onChange={(event) =>
+                          setMeta(channel.channelId, {
+                            calibration: {
+                              ...(meta.calibration ?? {}),
+                              fullAt: event.target.value,
+                            },
+                          })
+                        }
+                        placeholder="Reading when full"
+                        aria-label="Raw sensor reading with the bin full"
+                        className={cx(inputClass, 'w-40 py-1.5 text-xs')}
+                      />
+                      <span className="text-[10px] text-slate-400">
+                        Leave blank if the device already sends a percentage
+                      </span>
+                    </div>
+
                     {/* Position is always editable: a bin that sits in the
                         wrong place needs correcting, not just filling in. */}
                     <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -596,8 +641,15 @@ export const SettingsPage = () => {
             </label>
 
             <Field
-              label={`Dispatch at priority ${auto.minScore} and above`}
-              hint="Lower sends trucks sooner and more often. 70 is roughly a full bin."
+              label={`Dispatch at priority ${auto.minScore} and above${
+                auto.minScore >= 60
+                  ? ` (about ${Math.round(
+                      settings.thresholds.full +
+                        ((auto.minScore - 60) / 20) * (100 - settings.thresholds.full),
+                    )}% full)`
+                  : ' (before a bin is even full)'
+              }`}
+              hint={`A bin scores 60 the moment it reaches your ${settings.thresholds.full}% full threshold. Above that it climbs with how far past full it is, and with reports, weight and how fast it is filling.`}
             >
               <input
                 type="range"

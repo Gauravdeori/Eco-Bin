@@ -71,8 +71,16 @@ export const DEFAULT_SETTINGS = {
    */
   autoDispatch: {
     enabled: false,
-    /** Priority score a bin must reach before a truck is sent unprompted. */
-    minScore: 70,
+    /**
+     * Priority score a bin must reach before a truck is sent unprompted.
+     *
+     * Sixty is the score a bin has at exactly the configured full threshold,
+     * whatever that threshold is set to — so this default means "dispatch as
+     * soon as a bin is full". It used to be seventy, which a bin does not
+     * reach until about 90% fill: bins sat marked Full with no truck coming,
+     * which is the opposite of what switching automation on is for.
+     */
+    minScore: 60,
     /** How long a bin is left alone after an operator calls off its dispatch. */
     cooldownMinutes: 30,
   },
