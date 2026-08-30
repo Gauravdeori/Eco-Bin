@@ -252,15 +252,22 @@ const atDispatch = (bin, assignment) => {
  * Operator actions (dispatch, maintenance flags) and open citizen reports sit
  * on top of the telemetry status without overwriting the sensor truth.
  */
-export const applyOverlays = (bin, { assignments, maintenance, reports }) => {
+export const applyOverlays = (bin, { assignments, maintenance, reports, arrived }) => {
   const assignment = assignments[bin.channelId];
+  /**
+   * The truck has physically reached this bin. From that moment the sensors
+   * are believed again: the hold existed to stop a mid-route drop cancelling
+   * the trip, and the trip is over. The moment the reading falls, the bin
+   * shows it — which is also what flips the pin back to Normal.
+   */
+  const reached = Boolean(arrived?.has?.(bin.channelId));
   const openReport = reports.find(
     (report) => report.channelId === bin.channelId && report.status !== 'RESOLVED',
   );
 
   let status = bin.telemetryStatus;
   if (maintenance[bin.channelId]) status = STATUS.MAINTENANCE;
-  else if (assignment) status = STATUS.ASSIGNED;
+  else if (assignment && !reached) status = STATUS.ASSIGNED;
   else if (openReport && status !== STATUS.FULL) status = STATUS.REPORTED;
 
   /**
@@ -281,7 +288,7 @@ export const applyOverlays = (bin, { assignments, maintenance, reports }) => {
   let weight = bin.weight;
   let awaitingCollection = false;
 
-  const sent = assignment ? atDispatch(bin, assignment) : null;
+  const sent = assignment && !reached ? atDispatch(bin, assignment) : null;
   if (sent) {
     /**
      * One decision covers both readings, because they describe one event.

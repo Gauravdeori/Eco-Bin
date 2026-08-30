@@ -169,9 +169,21 @@ export const EcoBinProvider = ({ children }) => {
     simCollections,
   ]);
 
+  /** Bins the active runs have already reached, whatever their sensors say. */
+  const arrived = useMemo(() => {
+    const set = new Set();
+    Object.values(runs).forEach((run) => {
+      (run.collected ?? []).forEach((channelId) => set.add(channelId));
+    });
+    return set;
+  }, [runs]);
+
   const bins = useMemo(
-    () => telemetryBins.map((bin) => applyOverlays(bin, { assignments, maintenance, reports })),
-    [telemetryBins, assignments, maintenance, reports],
+    () =>
+      telemetryBins.map((bin) =>
+        applyOverlays(bin, { assignments, maintenance, reports, arrived }),
+      ),
+    [telemetryBins, assignments, maintenance, reports, arrived],
   );
 
   const selectedBin = useMemo(
@@ -203,6 +215,19 @@ export const EcoBinProvider = ({ children }) => {
   }, [ranking]);
 
   /* ── alerts derived from real telemetry transitions ─────────────────────── */
+
+  /**
+   * Synced here, before the effect below, because effects run in declaration
+   * order. The collection check reads these refs, and syncing them at the
+   * bottom of the component meant it always saw the previous commit's runs —
+   * so a truck's arrival was invisible for exactly the tick that mattered,
+   * and the collection it enabled was deferred.
+   */
+  useEffect(() => {
+    runsRef.current = runs;
+    assignmentsRef.current = assignments;
+  });
+
   const previousRef = useRef(new Map());
 
   useEffect(() => {
@@ -264,6 +289,20 @@ export const EcoBinProvider = ({ children }) => {
       const run = pending ? runsRef.current[pending.truckId] : null;
       const stillOnItsWay =
         Boolean(pending) && (!run || !(run.collected ?? []).includes(bin.channelId));
+
+      /**
+       * A collection deferred because the truck had not arrived yet must be
+       * seen again on the next tick. The snapshot above already recorded the
+       * new lastCollected, which would make the comparison below pass exactly
+       * once — this tick — and never again. Rewinding the snapshot keeps the
+       * event alive until the truck gets there and it can be registered.
+       */
+      if (collectedAt !== null && collectedAt !== before.lastCollectedAt && stillOnItsWay) {
+        previous.set(bin.channelId, {
+          ...previous.get(bin.channelId),
+          lastCollectedAt: before.lastCollectedAt,
+        });
+      }
 
       if (collectedAt !== null && collectedAt !== before.lastCollectedAt && !stillOnItsWay) {
         pushAlert({
@@ -1035,8 +1074,6 @@ export const EcoBinProvider = ({ children }) => {
     binsRef.current = bins;
     assignTruckRef.current = assignTruck;
     handledCommandsRef.current = handledCommands;
-    runsRef.current = runs;
-    assignmentsRef.current = assignments;
   });
 
   /**
